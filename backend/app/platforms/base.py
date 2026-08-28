@@ -236,22 +236,67 @@ class BasePlatform(ABC):
                 continue
         return False
 
-    async def scan_form_fields(self, container: Optional[ElementHandle] = None) -> List[Dict[str, Any]]:
+    async def cleanup_extra_pages(self):
+        """Cleanly close any opened popups/tabs, keeping only the main navigation page."""
+        if not self.context:
+            return
+        for p in list(self.context.pages):
+            if p != self.page and not p.is_closed():
+                try:
+                    await p.close()
+                except Exception:
+                    pass
+
+    def is_title_relevant(self, job_title: str) -> bool:
+        """Check if job title matches search keywords and filters out conflicting stacks."""
+        if not self.config.keywords:
+            return True
+
+        keywords_lower = self.config.keywords.lower()
+        title_lower = job_title.lower()
+
+        # Check for explicitly conflicting tech stacks if not requested by user
+        conflicts = [
+            ("java full stack", ["react", "frontend", "node", "python"]),
+            ("core java", ["react", "frontend", "javascript"]),
+            ("java developer", ["react", "frontend", "frontend developer", "ui developer"]),
+            ("dotnet", ["react", "frontend", "python"]),
+            (".net", ["react", "frontend", "python"]),
+            ("php developer", ["react", "python", "node"]),
+            ("angular developer", ["react", "reactjs"]),
+            ("flutter developer", ["react", "reactjs"]),
+            ("salesforce", ["react", "frontend", "full stack"]),
+            ("qa automation", ["developer", "software engineer", "frontend", "full stack"]),
+        ]
+
+        for conflicting_phrase, intended_targets in conflicts:
+            if conflicting_phrase in title_lower and not any(conflicting_phrase in k for k in keywords_lower.split(",")):
+                if any(target in keywords_lower for target in intended_targets):
+                    logger.info(f"Skipping conflicting job title: '{job_title}' (conflicts with target keywords '{self.config.keywords}')")
+                    return False
+
+        return True
+
+    async def scan_form_fields(
+        self,
+        target_page: Optional[Page] = None,
+        container: Optional[ElementHandle] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Scan all interactive form elements inside container (or whole page)
+        Scan all interactive form elements inside container (or target page)
         and construct structured metadata for LLM mapping.
         """
-        root = container or self.page
-        if not root:
+        page = target_page or self.page
+        if not page:
             return []
 
         js_scanner = """
-        () => {
+        (rootElem) => {
+            const scope = rootElem || document;
             const fields = [];
-            const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea');
+            const inputs = scope.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea');
             
             inputs.forEach((el, index) => {
-                // Find visible label
                 let labelText = '';
                 if (el.id) {
                     const labelElem = document.querySelector(`label[for="${el.id}"]`);
@@ -267,8 +312,10 @@ class BasePlatform(ABC):
                 if (!labelText && el.placeholder) {
                     labelText = el.placeholder;
                 }
+                if (!labelText && el.name) {
+                    labelText = el.name;
+                }
 
-                // Get options for select or radio
                 let options = [];
                 if (el.tagName.toLowerCase() === 'select') {
                     options = Array.from(el.querySelectorAll('option')).map(o => o.innerText.trim() || o.value);
@@ -291,7 +338,10 @@ class BasePlatform(ABC):
         }
         """
         try:
-            detected = await self.page.evaluate(js_scanner)
+            if container:
+                detected = await container.evaluate(js_scanner)
+            else:
+                detected = await page.evaluate(js_scanner)
             return detected or []
         except Exception as e:
             logger.warning(f"Error scanning form fields: {e}")
@@ -301,10 +351,15 @@ class BasePlatform(ABC):
         self,
         job_title: str,
         company: str,
+        target_page: Optional[Page] = None,
         container: Optional[ElementHandle] = None
     ) -> bool:
         """Scan form fields, request LLM mapping, and fill inputs accurately."""
-        fields = await self.scan_form_fields(container)
+        page = target_page or self.page
+        if not page:
+            return False
+
+        fields = await self.scan_form_fields(target_page=page, container=container)
         if not fields:
             return True
 
@@ -312,8 +367,9 @@ class BasePlatform(ABC):
         profile_dict = self.profile.model_dump()
 
         mapping = await llm_client.map_form_fields(profile_dict, fields, job_context)
-        logger.info(f"LLM field mapping: {mapping}")
+        logger.info(f"LLM field mapping for {job_title}: {mapping}")
 
+        scope = container or page
         for field in fields:
             await self.check_pause_and_stop()
             field_id = field.get("id")
@@ -322,22 +378,19 @@ class BasePlatform(ABC):
             field_tag = field.get("tag", "input").lower()
 
             target_val = mapping.get(field_id) or mapping.get(field_name)
-
             if target_val is None:
                 continue
 
             try:
-                # Target selector
                 selector = f"#{field_id}" if field_id and not field_id.startswith("field_") else f"[name='{field_name}']"
-                elem = await self.page.query_selector(selector)
+                elem = await scope.query_selector(selector)
                 if not elem or not await elem.is_visible():
                     continue
 
                 if field_type == "file":
-                    # File upload handled separately
                     if self.resume_file_path and self.resume_file_path.exists():
                         await elem.set_input_files(str(self.resume_file_path))
-                        await broadcaster.emit_log(f"Attached resume file: {self.resume_file_path.name}", platform=self.platform_name.value)
+                        await broadcaster.emit_log(f"📎 Attached resume file: {self.resume_file_path.name}", platform=self.platform_name.value)
                 elif field_type in ["checkbox"]:
                     should_check = bool(target_val)
                     is_checked = await elem.is_checked()
@@ -353,7 +406,7 @@ class BasePlatform(ABC):
                 else: # text, email, tel, number, textarea
                     await self.human_type(elem, str(target_val))
                 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.2)
             except Exception as e:
                 logger.warning(f"Could not fill field {field_id}: {e}")
 

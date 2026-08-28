@@ -154,59 +154,117 @@ class NaukriPlatform(BasePlatform):
                     company = (await company_elem.inner_text()).strip() if company_elem else "Tech Firm"
                     job_link = await title_elem.get_attribute("href") if title_elem else self.page.url
 
+                    # Check title relevance
+                    if not self.is_title_relevant(job_title):
+                        await broadcaster.emit_log(
+                            f"Skipping role: '{job_title}' at {company} (does not match target stack '{self.config.keywords}')",
+                            platform=self.platform_name.value
+                        )
+                        continue
+
                     if excel_tracker.is_already_applied(job_link):
                         await broadcaster.emit_log(f"Skipping already applied Naukri job: {job_title} at {company}", platform=self.platform_name.value)
                         continue
 
-                    # Open job details in new tab or navigate
+                    # Open job details in new tab
                     await broadcaster.emit_log(f"Opening Naukri job: {job_title} at {company}", level=LogLevel.ACTION, platform=self.platform_name.value)
                     
                     job_page = await self.context.new_page()
                     await job_page.goto(job_link, wait_until="domcontentloaded", timeout=30000)
                     await asyncio.sleep(2)
 
-                    apply_btn = await job_page.query_selector("#apply-button, button.apply-button, .apply-message, button:has-text('Apply')")
+                    apply_btn = await job_page.query_selector("#apply-button, button.apply-button, .apply-message, button:has-text('Apply'), a:has-text('Apply')")
                     if not apply_btn:
-                        await job_page.close()
                         continue
 
                     btn_text = (await apply_btn.inner_text()).lower()
-                    if "company site" in btn_text or "redirect" in btn_text:
-                        await broadcaster.emit_log(f"Job redirects to external company portal. Logging for manual review.", platform=self.platform_name.value)
-                        self.record_job_result(job_title, company, job_link, ApplicationStatus.MANUAL_REVIEW_NEEDED, "External company site application")
-                        await job_page.close()
-                        continue
 
-                    # Quick Apply on Naukri
-                    if not self.config.dry_run:
-                        await apply_btn.click()
-                        await asyncio.sleep(2)
+                    if "company site" in btn_text or "redirect" in btn_text or "website" in btn_text:
+                        # Follow through and auto-fill external company application!
+                        await broadcaster.emit_log(
+                            f"🌐 Following external company portal for: {job_title} at {company}...",
+                            level=LogLevel.ACTION,
+                            platform=self.platform_name.value
+                        )
 
-                        # Handle chatbot questionnaire if opens
-                        chat_modal = await job_page.query_selector(".chatbot_Drawer, .apply-drawer")
-                        if chat_modal:
-                            await self.fill_form_with_llm(job_title, company, chat_modal)
-                            submit_chat = await chat_modal.query_selector("button:has-text('Submit'), button:has-text('Apply')")
-                            if submit_chat:
-                                await submit_chat.click()
+                        ext_page = None
+                        try:
+                            # Catch popup if new tab opens, or stay in current page
+                            async with self.context.expect_page(timeout=7000) as page_info:
+                                await apply_btn.click()
+                            ext_page = await page_info.value
+                        except Exception:
+                            # If no new tab opened, check if job_page navigated
+                            ext_page = job_page
 
-                    applied_count += 1
-                    status = ApplicationStatus.DRY_RUN_COMPLETED if self.config.dry_run else ApplicationStatus.SUCCESS
-                    self.record_job_result(job_title, company, job_link, status, "Successfully applied via Naukri Quick Apply")
-                    
-                    await broadcaster.emit_log(
-                        f"✅ [{applied_count}/{self.config.max_applications}] Applied on Naukri: {job_title} at {company}!",
-                        level=LogLevel.SUCCESS,
-                        platform=self.platform_name.value
-                    )
-                    await job_page.close()
+                        if ext_page:
+                            try:
+                                await ext_page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+                            await asyncio.sleep(3)
+
+                            # If there is an introductory "Apply Now" button on external portal, click it
+                            ext_apply_btn = await ext_page.query_selector("button:has-text('Apply for this job'), button:has-text('Apply Now'), a:has-text('Apply Now'), a:has-text('Apply for this job'), #apply-button, .apply-button")
+                            if ext_apply_btn and await ext_apply_btn.is_visible():
+                                try:
+                                    await ext_apply_btn.click()
+                                    await asyncio.sleep(2)
+                                except Exception:
+                                    pass
+
+                            # Auto-fill external application form using local LLM
+                            await broadcaster.emit_log(f"🤖 Scanning and auto-filling form fields with local AI on {company}...", platform=self.platform_name.value)
+                            await self.fill_form_with_llm(job_title, company, target_page=ext_page)
+
+                            if not self.config.dry_run:
+                                ext_submit_btn = await ext_page.query_selector("button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit'), input[type='submit']")
+                                if ext_submit_btn and await ext_submit_btn.is_visible():
+                                    await ext_submit_btn.click()
+                                    await asyncio.sleep(2)
+
+                        applied_count += 1
+                        status = ApplicationStatus.DRY_RUN_COMPLETED if self.config.dry_run else ApplicationStatus.SUCCESS
+                        self.record_job_result(job_title, company, job_link, status, "Successfully applied via External Company Portal")
+                        
+                        await broadcaster.emit_log(
+                            f"✅ [{applied_count}/{self.config.max_applications}] Applied on External Portal: {job_title} at {company}!",
+                            level=LogLevel.SUCCESS,
+                            platform=self.platform_name.value
+                        )
+
+                    else:
+                        # Quick Apply on Naukri
+                        if not self.config.dry_run:
+                            await apply_btn.click()
+                            await asyncio.sleep(2)
+
+                            # Handle chatbot questionnaire if opens
+                            chat_modal = await job_page.query_selector(".chatbot_Drawer, .apply-drawer")
+                            if chat_modal:
+                                await self.fill_form_with_llm(job_title, company, target_page=job_page, container=chat_modal)
+                                submit_chat = await chat_modal.query_selector("button:has-text('Submit'), button:has-text('Apply')")
+                                if submit_chat:
+                                    await submit_chat.click()
+
+                        applied_count += 1
+                        status = ApplicationStatus.DRY_RUN_COMPLETED if self.config.dry_run else ApplicationStatus.SUCCESS
+                        self.record_job_result(job_title, company, job_link, status, "Successfully applied via Naukri Quick Apply")
+                        
+                        await broadcaster.emit_log(
+                            f"✅ [{applied_count}/{self.config.max_applications}] Applied on Naukri: {job_title} at {company}!",
+                            level=LogLevel.SUCCESS,
+                            platform=self.platform_name.value
+                        )
 
                     # Cooldown
                     await asyncio.sleep(self.config.cooldown_seconds)
 
                 except Exception as e:
                     logger.warning(f"Error applying on Naukri item #{idx}: {e}")
-                    continue
+                finally:
+                    # Cleanly close all opened popups/tabs, leaving only the main search page
+                    await self.cleanup_extra_pages()
 
             # Pagination
             next_btn = await self.page.query_selector("a.styles_btn-secondary__2AsIS:has-text('Next'), a:has-text('Next')")
