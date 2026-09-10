@@ -62,11 +62,39 @@ export const botAPI = {
     const response = await apiClient.get(`/bot/logs?limit=${limit}`);
     return response.data;
   },
+
+  updateNaukriHeadline: async (headline) => {
+    const response = await apiClient.post('/bot/naukri/update-headline', { headline });
+    return response.data;
+  },
+
+  runPreflight: async (config = null) => {
+    if (config) {
+      const response = await apiClient.post('/bot/preflight', config);
+      return response.data;
+    }
+    const response = await apiClient.get('/bot/preflight');
+    return response.data;
+  },
 };
 
 export const jobsAPI = {
   getList: async (limit = 200) => {
     const response = await apiClient.get(`/jobs/list?limit=${limit}`);
+    return response.data;
+  },
+
+  getManualReviewQueue: async (limit = 100) => {
+    const response = await apiClient.get(`/jobs/manual-review?limit=${limit}`);
+    return response.data;
+  },
+
+  resolveManualReview: async (jobUrl, action, notes = '') => {
+    const response = await apiClient.post('/jobs/manual-review/resolve', {
+      job_url: jobUrl,
+      action,
+      notes
+    });
     return response.data;
   },
 

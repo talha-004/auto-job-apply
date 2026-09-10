@@ -2,6 +2,8 @@ import asyncio
 import json
 import random
 from abc import ABC, abstractmethod
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -20,10 +22,13 @@ from app.models.job import (
     SearchConfig,
     JobApplicationRecord,
     ApplicationStatus,
+    JobLifecycleStatus,
+    ReasonCode,
     LogLevel,
     PlatformEnum
 )
 from app.services.excel_tracker import excel_tracker
+from app.platforms.naukri_helpers import normalize_token
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -31,6 +36,16 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0"
 ]
+
+class VerificationResult(str, Enum):
+    CONFIRMED_SUCCESS = "CONFIRMED_SUCCESS"
+    CONFIRMED_FAILURE = "CONFIRMED_FAILURE"
+    UNKNOWN = "UNKNOWN"
+
+class PersistenceError(Exception):
+    """Raised when job discovery/application record cannot be persisted."""
+    pass
+
 
 class BasePlatform(ABC):
     def __init__(
@@ -57,6 +72,8 @@ class BasePlatform(ABC):
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
         self.cookie_file = settings.COOKIES_DIR / f"{self.platform_name.value.lower()}_cookies.json"
+        self.run_id: str = getattr(config, "run_id", None) or f"RUN-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        self.attempt_counters: Dict[str, int] = {}
 
     async def init_browser(self) -> Page:
         """Launch stealth Playwright browser with persistent context or saved cookies."""
@@ -71,7 +88,9 @@ class BasePlatform(ABC):
             "--disable-infobars",
             "--no-first-run",
             "--window-position=0,0",
-            "--window-size=1920,1080"
+            "--window-size=1920,1080",
+            "--disable-notifications",
+            "--deny-permission-prompts"
         ]
 
         logger.info(
@@ -107,7 +126,8 @@ class BasePlatform(ABC):
             "has_touch": False,
             "is_mobile": False,
             "device_scale_factor": 1,
-            "accept_downloads": True
+            "accept_downloads": True,
+            "permissions": []
         }
 
         if settings.PROXY_URL:
@@ -211,9 +231,38 @@ class BasePlatform(ABC):
             await self.check_pause_and_stop()
             await element.type(char, delay=random.uniform(30, 80))
 
+    async def dismiss_notification_prompts(self, target_page: Optional[Page] = None) -> bool:
+        """Dismiss in-page notification banners or prompt overlays (e.g. 'Later', 'Not now', 'Block')."""
+        page = target_page or self.page
+        if not page:
+            return False
+        dismiss_selectors = [
+            "button:has-text('Later')",
+            "button:has-text('Maybe Later')",
+            "button:has-text('Not now')",
+            "button:has-text('Block')",
+            "button:has-text('Remind me later')",
+            "span:has-text('Later')",
+            ".crossIcon",
+            "[aria-label='Close notification']",
+            ".notification-banner .close",
+            ".push-notification-close"
+        ]
+        for sel in dismiss_selectors:
+            try:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(0.3)
+                    return True
+            except Exception:
+                pass
+        return False
+
     async def human_scroll(self, distance: int = 400):
         """Simulate realistic human page scrolling."""
         if self.page:
+            await self.dismiss_notification_prompts(self.page)
             steps = random.randint(3, 6)
             step_dist = distance / steps
             for _ in range(steps):
@@ -267,31 +316,94 @@ class BasePlatform(ABC):
                     pass
 
     def is_title_relevant(self, job_title: str) -> bool:
-        """Check if job title matches search keywords and filters out conflicting stacks."""
-        if not self.config.keywords:
-            return True
-
-        keywords_lower = self.config.keywords.lower()
+        """
+        Check if job title matches candidate's actual qualifications and target stack.
+        Filters out conflicting tech stacks (where candidate has 0 skills) and extreme seniority mismatches.
+        """
         title_lower = job_title.lower()
+        keywords_lower = (self.config.keywords or "").lower()
 
-        # Check for explicitly conflicting tech stacks if not requested by user
-        conflicts = [
-            ("java full stack", ["react", "frontend", "node", "python"]),
-            ("core java", ["react", "frontend", "javascript"]),
-            ("java developer", ["react", "frontend", "frontend developer", "ui developer"]),
-            ("dotnet", ["react", "frontend", "python"]),
-            (".net", ["react", "frontend", "python"]),
-            ("php developer", ["react", "python", "node"]),
-            ("angular developer", ["react", "reactjs"]),
-            ("flutter developer", ["react", "reactjs"]),
-            ("salesforce", ["react", "frontend", "full stack"]),
-            ("qa automation", ["developer", "software engineer", "frontend", "full stack"]),
+        # 1. Seniority Check: Filter executive / senior leadership roles for junior/mid candidates
+        candidate_exp = float(getattr(self.profile, "years_of_experience", 2.0) or 2.0) if self.profile else 2.0
+        if candidate_exp <= 4.0:
+            executive_markers = [
+                "cto", "chief technology officer", "chief technical officer",
+                "vice president", "vp -", "vp /", "vp,", "vp-", "vp:",
+                "director of", "director -", "head of engineering", "head of technology",
+                "principal architect", "enterprise architect"
+            ]
+            for marker in executive_markers:
+                if marker in title_lower and marker not in keywords_lower:
+                    logger.info(f"Skipping executive/leadership role for candidate with {candidate_exp} YOE: '{job_title}'")
+                    return False
+
+        # 2. Extract normalized candidate skills for cross-referencing
+        candidate_skills = set()
+        if self.profile and self.profile.skills:
+            candidate_skills = {normalize_token(s) for s in self.profile.skills if s}
+            if self.profile.work_experience:
+                for exp in self.profile.work_experience:
+                    for w in exp.title.lower().split():
+                        candidate_skills.add(normalize_token(w))
+
+        # 3. Define conflicting tech stack families
+        # If title matches a family's patterns, candidate MUST have at least one skill in that family
+        # (unless the user explicitly searched for that family in keywords)
+        tech_families = [
+            (
+                "dotnet",
+                [".net", "dotnet", "dot net", "asp.net", "c#", "csharp", "vb.net"],
+                ["dotnet", ".net", "dot net", "aspnet", "c#", "csharp", "vbnet"]
+            ),
+            (
+                "java",
+                ["java full stack", "core java", "java developer", "spring boot", "springboot", "j2ee", "java/j2ee", "java backend", "java software"],
+                ["java", "spring", "springboot", "spring boot", "hibernate", "j2ee"]
+            ),
+            (
+                "angular",
+                ["angular developer", "angularjs developer", "angular js developer", "angular/"],
+                ["angular", "angularjs", "angular.js"]
+            ),
+            (
+                "php",
+                ["php developer", "laravel developer", "wordpress developer", "symfony developer", "codeigniter"],
+                ["php", "laravel", "wordpress", "symfony", "codeigniter"]
+            ),
+            (
+                "flutter",
+                ["flutter developer", "dart developer", "flutter/"],
+                ["flutter", "dart"]
+            ),
+            (
+                "salesforce",
+                ["salesforce", "sfdc", "apex developer"],
+                ["salesforce", "sfdc", "apex"]
+            ),
+            (
+                "aiml",
+                ["ai ml", "ai/ml", "machine learning engineer", "data scientist", "deep learning", "nlp engineer", "computer vision"],
+                ["machine learning", "deep learning", "nlp", "computer vision", "data science", "tensorflow", "pytorch", "ai ml"]
+            ),
+            (
+                "qa_testing",
+                ["qa automation", "automation test engineer", "qa engineer", "quality assurance engineer", "selenium", "tester", "manual testing"],
+                ["qa automation", "selenium", "cypress", "automation testing", "manual testing", "qa"]
+            ),
         ]
 
-        for conflicting_phrase, intended_targets in conflicts:
-            if conflicting_phrase in title_lower and not any(conflicting_phrase in k for k in keywords_lower.split(",")):
-                if any(target in keywords_lower for target in intended_targets):
-                    logger.info(f"Skipping conflicting job title: '{job_title}' (conflicts with target keywords '{self.config.keywords}')")
+        for family_name, title_patterns, skill_tokens in tech_families:
+            title_matches = any(p in title_lower for p in title_patterns)
+            if title_matches:
+                # If user explicitly searched for this family in keywords, allow it
+                user_requested = any(p in keywords_lower for p in title_patterns)
+                if user_requested:
+                    continue
+
+                # Check if candidate has ANY skill in this family
+                cand_has_skill = any(normalize_token(st) in candidate_skills for st in skill_tokens)
+                if not cand_has_skill:
+                    logger.info(f"Skipping non-matching tech stack role: '{job_title}' (candidate has no {family_name} experience in resume)")
                     return False
 
         return True
@@ -520,6 +632,9 @@ class BasePlatform(ABC):
                         await broadcaster.emit_log(f"📎 Attached resume file: {self.resume_file_path.name}", platform=self.platform_name.value)
                     continue
 
+                if not await elem.is_visible():
+                    continue
+
                 if target_val is None or target_val == "":
                     continue
 
@@ -527,21 +642,21 @@ class BasePlatform(ABC):
                     should_check = bool(target_val)
                     is_checked = await elem.is_checked()
                     if should_check != is_checked:
-                        await elem.click()
+                        await elem.click(timeout=3000)
                 elif field_type in ["radio"]:
-                    await elem.click()
+                    await elem.click(timeout=3000)
                 elif field_tag == "select":
                     try:
-                        await elem.select_option(label=str(target_val))
+                        await elem.select_option(label=str(target_val), timeout=3000)
                     except Exception:
                         try:
-                            await elem.select_option(value=str(target_val))
+                            await elem.select_option(value=str(target_val), timeout=3000)
                         except Exception:
                             pass
                 else: # text, email, tel, number, textarea
                     try:
-                        await elem.click()
-                        await elem.fill(str(target_val))
+                        await elem.click(timeout=3000)
+                        await elem.fill(str(target_val), timeout=3000)
                     except Exception:
                         await self.human_type(elem, str(target_val))
                 
@@ -643,8 +758,110 @@ class BasePlatform(ABC):
 
             return True
         except Exception as e:
-            logger.warning(f"External application error for {company}: {e}")
+            logger.error(f"Error traversing external portal: {e}")
             return False
+
+    async def check_external_requires_login(self, page: Page) -> Tuple[bool, str]:
+        """
+        Check if an external company application portal requires user login / registration
+        before allowing form submission.
+        """
+        try:
+            # 1. Check for password input fields
+            password_input = await page.query_selector("input[type='password']")
+            if password_input and await password_input.is_visible():
+                return (True, "Company site requires login (password field detected)")
+
+            # 2. Check for explicit login / sign-in buttons or links
+            login_selectors = [
+                "button:has-text('Sign In to Apply')",
+                "a:has-text('Sign In to Apply')",
+                "button:has-text('Log in to apply')",
+                "a:has-text('Log in to apply')",
+                "button:has-text('Log in with')",
+                "button:has-text('Sign in with')",
+                "a[data-automation-id='signInLink']",
+                "button[data-automation-id='signInSubmitButton']",
+                "div[data-automation-id='signInContainer']",
+                "#workday-login",
+                ".login-container",
+                ".login-form",
+                "form#login-form",
+                "form[action*='login']",
+                "form[action*='signin']"
+            ]
+            for sel in login_selectors:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    return (True, "Company site requires login / account creation")
+
+            # 3. Check text content for login requirement cues
+            page_text = (await page.inner_text("body")).lower()
+            login_phrases = [
+                "please sign in to apply",
+                "sign in to apply for this job",
+                "you must be logged in to apply",
+                "log in or create an account to apply",
+                "sign in with your account to apply",
+                "create an account to apply",
+                "login required to apply"
+            ]
+            for phrase in login_phrases:
+                if phrase in page_text:
+                    return (True, "Company site requires login / account creation")
+
+            return (False, "")
+        except Exception as e:
+            logger.debug(f"Error checking login requirement on external portal: {e}")
+            return (False, "")
+
+    async def safe_click(self, element: Optional[ElementHandle], timeout: int = 5000) -> bool:
+        """
+        Safely scrolls element into view, confirms visibility and enabled state, and clicks.
+        Returns True if click succeeded; returns False on timeout, detachment, or interception.
+        """
+        if not element:
+            return False
+        try:
+            await element.scroll_into_view_if_needed(timeout=timeout)
+            await element.wait_for_element_state("visible", timeout=timeout)
+            await element.wait_for_element_state("enabled", timeout=timeout)
+            await element.click(timeout=timeout)
+            return True
+        except Exception as e:
+            logger.debug(f"safe_click failed safely: {e}")
+            return False
+
+    async def initialize_session(self) -> bool:
+        """Verify session credentials, cookie validity, profile availability, and search connectivity."""
+        return await self.is_logged_in()
+
+    def get_attempt_id(self, job_id: str) -> str:
+        """Generate unique application attempt ID for traceability."""
+        seq = self.attempt_counters.get(job_id, 0) + 1
+        self.attempt_counters[job_id] = seq
+        clean_id = job_id.replace("JOB-", "") if job_id else "unknown"
+        return f"ATTEMPT-{clean_id}-{seq:02d}"
+
+    async def with_retry(self, coro_func, max_retries: int = 3, base_delay: float = 1.0, op_name: str = "operation"):
+        """Bounded exponential retry helper for idempotent actions (DOM wait, network goto)."""
+        last_exc = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                return await coro_func()
+            except Exception as e:
+                last_exc = e
+                if attempt == max_retries:
+                    logger.warning(f"{op_name} failed after {max_retries} attempts: {e}")
+                    raise
+                jitter = random.uniform(-0.2, 0.2)
+                delay = (base_delay * (2 ** (attempt - 1))) + jitter
+                await asyncio.sleep(max(0.2, delay))
+        raise last_exc
+
+    async def verify_application_result(self, target_page: Optional[Page] = None) -> VerificationResult:
+        """Inspect page for confirmed application submission or failure signals."""
+        return VerificationResult.UNKNOWN
 
     def record_job_result(
         self,
@@ -652,18 +869,81 @@ class BasePlatform(ABC):
         company: str,
         job_url: str,
         status: ApplicationStatus,
-        notes: str = ""
+        notes: str = "",
+        hr_email: Optional[str] = None,
+        recruiter_name: Optional[str] = None,
+        match_score: Optional[int] = None,
+        contacts: Optional[List[Any]] = None,
+        skip_reason: Optional[str] = None,
+        suggested_outreach: Optional[str] = None,
+        application_type: str = "quick_apply",
+        job_id: Optional[str] = None,
+        application_attempt_id: Optional[str] = None,
+        job_quality_score: Optional[int] = None,
+        priority_score: Optional[int] = None,
+        priority_reasons: Optional[List[str]] = None,
+        risk_flags: Optional[List[str]] = None,
+        risk_evidence: Optional[Dict[str, str]] = None,
+        reason_code: Optional[ReasonCode | str] = None,
+        status_reason: Optional[str] = None,
+        lifecycle_status: Optional[JobLifecycleStatus] = None
     ) -> JobApplicationRecord:
-        """Construct and write record to Excel and emit status log."""
+        """Construct and write record to Excel and emit status log. Raises PersistenceError if write fails."""
+        if lifecycle_status is None:
+            status_val = status.value if isinstance(status, ApplicationStatus) else str(status)
+            if "Manual" in status_val:
+                lifecycle_status = JobLifecycleStatus.MANUAL_REVIEW
+            elif "Success" in status_val or "Applied" in status_val:
+                lifecycle_status = JobLifecycleStatus.SUCCESS
+            elif "Failed" in status_val:
+                lifecycle_status = JobLifecycleStatus.FAILED
+            elif "Skipped" in status_val:
+                lifecycle_status = JobLifecycleStatus.SKIPPED
+            elif "Duplicate" in status_val:
+                lifecycle_status = JobLifecycleStatus.POSSIBLE_DUPLICATE
+            elif "Discovered" in status_val:
+                lifecycle_status = JobLifecycleStatus.DISCOVERED
+            elif "Progress" in status_val:
+                lifecycle_status = JobLifecycleStatus.APPLYING
+            else:
+                lifecycle_status = JobLifecycleStatus.ANALYZED
+
         record = JobApplicationRecord(
+            job_id=job_id,
+            run_id=self.run_id,
+            application_attempt_id=application_attempt_id,
             platform=self.platform_name.value,
             job_title=job_title or "Job Position",
             company=company or "Company",
             job_url=job_url or "",
             status=status,
-            notes=notes
+            lifecycle_status=lifecycle_status,
+            application_type=application_type,
+            notes=notes,
+            hr_email=hr_email,
+            recruiter_name=recruiter_name,
+            match_score=match_score,
+            contacts=[c.model_dump() if hasattr(c, "model_dump") else c for c in (contacts or [])],
+            skip_reason=skip_reason or status_reason,
+            suggested_outreach=suggested_outreach,
+            job_quality_score=job_quality_score,
+            priority_score=priority_score,
+            priority_reasons=priority_reasons or [],
+            risk_flags=risk_flags or [],
+            risk_evidence=risk_evidence or {},
+            reason_code=str(reason_code.value if isinstance(reason_code, ReasonCode) else reason_code) if reason_code else None,
+            status_reason=status_reason or skip_reason,
+            lifecycle_history=[{
+                "status": str(status.value if isinstance(status, ApplicationStatus) else status),
+                "lifecycle_status": str(lifecycle_status.value if isinstance(lifecycle_status, JobLifecycleStatus) else (lifecycle_status or "")),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "reason_code": str(reason_code.value if isinstance(reason_code, ReasonCode) else reason_code) if reason_code else "",
+                "notes": notes
+            }]
         )
-        excel_tracker.log_application(record)
+        saved = excel_tracker.log_application(record)
+        if not saved:
+            raise PersistenceError(f"Failed to persist application record for '{job_title}' at '{company}' to Excel tracker.")
         return record
 
     @abstractmethod

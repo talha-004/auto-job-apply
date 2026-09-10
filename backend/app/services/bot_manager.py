@@ -12,8 +12,11 @@ from app.models.job import (
     SearchConfig,
     PlatformEnum,
     LogLevel,
-    ResumeProfile
+    ResumeProfile,
+    ApplicationStatus,
+    ReasonCode
 )
+from app.platforms.naukri_helpers import detect_application_limit
 from app.services.resume_parser import resume_parser_service
 from app.platforms.linkedin import LinkedInPlatform
 from app.platforms.naukri import NaukriPlatform
@@ -163,9 +166,260 @@ class BotManager:
             if self._pause_event:
                 self._worker_loop.call_soon_threadsafe(self._pause_event.set)
 
-        await broadcaster.emit_log("🛑 Bot stopped by user.", level=LogLevel.WARNING)
-        self.state = BotState.IDLE
-        return {"success": True, "message": "Bot stopped."}
+    async def update_naukri_headline(self, headline: str) -> Dict[str, Any]:
+        """Update candidate resume headline on Naukri reusing stored cookies."""
+        if self.state == BotState.RUNNING:
+            return {"success": False, "message": "Bot is currently running. Please wait or stop the bot before updating your profile."}
+
+        profile = resume_parser_service.load_profile() or ResumeProfile()
+        config = SearchConfig(headless=False)
+        bot_instance = NaukriPlatform(config=config, profile=profile)
+
+        try:
+            await bot_instance.init_browser()
+            logged_in = await bot_instance.login()
+            if not logged_in:
+                return {"success": False, "message": "Failed to authenticate on Naukri. Please ensure valid credentials or cookies."}
+
+            success = await bot_instance.update_profile_headline(headline)
+            if success:
+                return {"success": True, "message": f"Successfully updated Naukri headline to '{headline}'."}
+            else:
+                return {"success": False, "message": "Could not update headline on profile page."}
+        except Exception as e:
+            logger.error(f"Error in update_naukri_headline: {e}")
+            return {"success": False, "message": str(e)}
+        finally:
+            await bot_instance.close_browser()
+
+    async def run_preflight_check(self, config: Optional[SearchConfig] = None) -> Dict[str, Any]:
+        """Perform comprehensive pre-flight validation before starting application bot."""
+        checks = {}
+        has_errors = False
+        has_warnings = False
+
+        # 1. Candidate Resume Profile
+        profile = resume_parser_service.load_profile()
+        if not profile:
+            checks["profile"] = {
+                "status": "error",
+                "message": "Candidate resume profile not found. Upload a resume first."
+            }
+            has_errors = True
+        else:
+            skill_count = len(profile.skills) if profile.skills else 0
+            if skill_count < 3:
+                checks["profile"] = {
+                    "status": "warning",
+                    "message": f"Profile loaded ({profile.name or 'Candidate'}), but only {skill_count} skills detected. Match scoring accuracy may be reduced."
+                }
+                has_warnings = True
+            else:
+                checks["profile"] = {
+                    "status": "ok",
+                    "message": f"Profile ready: {profile.name or 'Candidate'} with {skill_count} detected skills."
+                }
+
+        # 2. Storage System & Excel Write Access
+        try:
+            excel_path = settings.EXCEL_FILE_PATH
+            excel_dir = excel_path.parent
+            excel_dir.mkdir(parents=True, exist_ok=True)
+            test_file = excel_dir / ".write_test.tmp"
+            test_file.write_text("ok", encoding="utf-8")
+            test_file.unlink(missing_ok=True)
+            checks["storage"] = {
+                "status": "ok",
+                "message": f"Persistence storage accessible at {excel_path.name}."
+            }
+        except Exception as e:
+            checks["storage"] = {
+                "status": "error",
+                "message": f"Persistence storage not writable: {str(e)}"
+            }
+            has_errors = True
+
+        # 3. LLM Configuration
+        if settings.GEMINI_API_KEY:
+            checks["llm"] = {
+                "status": "ok",
+                "message": f"Gemini LLM configured with model '{settings.GEMINI_MODEL}'."
+            }
+        elif settings.OLLAMA_BASE_URL:
+            checks["llm"] = {
+                "status": "ok",
+                "message": f"Ollama local LLM configured at {settings.OLLAMA_BASE_URL}."
+            }
+        else:
+            checks["llm"] = {
+                "status": "warning",
+                "message": "No LLM API key or Ollama endpoint configured. Chatbot questionnaires will fallback to profile answers."
+            }
+            has_warnings = True
+
+        # 4. Platforms & Authentication
+        platforms_to_check = config.platforms if (config and config.platforms) else [PlatformEnum.NAUKRI, PlatformEnum.LINKEDIN]
+        platform_checks = {}
+        for p in platforms_to_check:
+            if p == PlatformEnum.NAUKRI:
+                has_creds = bool(settings.NAUKRI_USERNAME and settings.NAUKRI_PASSWORD)
+                cookie_exists = (settings.COOKIE_DIR / "naukri_cookies.json").exists()
+                if has_creds or cookie_exists:
+                    platform_checks["naukri"] = {
+                        "status": "ok",
+                        "message": "Credentials or saved session cookies found."
+                    }
+                else:
+                    platform_checks["naukri"] = {
+                        "status": "warning",
+                        "message": "No Naukri credentials or saved cookies found in .env."
+                    }
+                    has_warnings = True
+            elif p == PlatformEnum.LINKEDIN:
+                has_creds = bool(settings.LINKEDIN_USERNAME and settings.LINKEDIN_PASSWORD)
+                cookie_exists = (settings.COOKIE_DIR / "linkedin_cookies.json").exists()
+                if has_creds or cookie_exists:
+                    platform_checks["linkedin"] = {
+                        "status": "ok",
+                        "message": "Credentials or saved session cookies found."
+                    }
+                else:
+                    platform_checks["linkedin"] = {
+                        "status": "warning",
+                        "message": "No LinkedIn credentials or saved cookies found in .env."
+                    }
+                    has_warnings = True
+            else:
+                platform_checks[p.value] = {"status": "ok", "message": "Public platform ready."}
+
+        checks["platforms"] = platform_checks
+
+        overall_status = "FAILED" if has_errors else ("WARNINGS" if has_warnings else "PASSED")
+        return {
+            "overall": overall_status,
+            "passed": not has_errors,
+            "checks": checks
+        }
+
+    async def apply_now_manual_job(self, job_url: str) -> Dict[str, Any]:
+        """Execute the exact same safety pipeline for a job in manual review queue:
+        Revalidate profile -> Revalidate duplicate status -> Revalidate session ->
+        Check platform limits -> Persist APPLYING -> Safely apply -> Verify result.
+        """
+        from app.services.excel_tracker import excel_tracker
+        from app.platforms.base import VerificationResult
+        import hashlib
+
+        current_status = excel_tracker.get_processed_status(job_url)
+        if current_status == ApplicationStatus.SUCCESS.value:
+            return {"success": False, "message": "Job is already marked as SUCCESS/Applied."}
+
+        profile = resume_parser_service.load_profile()
+        if not profile:
+            return {"success": False, "message": "No candidate profile found. Upload resume first."}
+
+        config = SearchConfig(headless=False)
+        bot_instance = NaukriPlatform(config=config, profile=profile)
+        job_id = f"JOB-{hashlib.md5(job_url.encode('utf-8')).hexdigest()[:8]}"
+        attempt_id = bot_instance.get_attempt_id(job_id)
+
+        try:
+            await bot_instance.init_browser()
+            logged_in = await bot_instance.login()
+            if not logged_in:
+                return {"success": False, "message": "Authentication failed during manual apply attempt."}
+
+            page = await bot_instance.context.new_page()
+            await page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
+
+            # Limit check
+            limit_reason = await detect_application_limit(page)
+            if limit_reason:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.FAILED,
+                    notes=f"Application limit: {limit_reason}",
+                    reason_code=ReasonCode.APPLICATION_LIMIT
+                )
+                return {"success": False, "message": f"Platform application limit reached: {limit_reason}"}
+
+            # Locate Apply button
+            apply_btn = await page.query_selector("#apply-button, button.apply-button, .apply-message, button:has-text('Apply'), a:has-text('Apply')")
+            if not apply_btn:
+                return {"success": False, "message": "Apply button not found on job page."}
+
+            btn_text = (await apply_btn.inner_text()).lower()
+            if "company site" in btn_text or "redirect" in btn_text or "website" in btn_text:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.SKIPPED,
+                    notes="External apply button (Never apply on external ATS)",
+                    reason_code=ReasonCode.EXTERNAL_APPLICATION
+                )
+                return {"success": False, "message": "External ATS redirect detected. Safety policy forbids automated external application."}
+
+            # Persist APPLYING state before clicking apply
+            excel_tracker.update_application_status(
+                job_url,
+                ApplicationStatus.APPLYING,
+                notes=f"Manual Apply Attempt {attempt_id}: Executing safety pipeline"
+            )
+
+            # Click Apply
+            clicked = await bot_instance.safe_click(apply_btn)
+            if not clicked:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.FAILED,
+                    notes="Could not safely click Apply button during manual attempt"
+                )
+                return {"success": False, "message": "Could not safely click Apply button."}
+
+            await asyncio.sleep(2)
+            await bot_instance.handle_naukri_chatbot(page, "Manual Apply Role", "Company")
+
+            # Post-submission limit check
+            limit_reason = await detect_application_limit(page)
+            if limit_reason:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.FAILED,
+                    notes=f"Application limit: {limit_reason}",
+                    reason_code=ReasonCode.APPLICATION_LIMIT
+                )
+                return {"success": False, "message": f"Platform limit reached post-submission: {limit_reason}"}
+
+            # Verify submission
+            verify_res = await bot_instance.verify_application_result(page)
+            if verify_res == VerificationResult.CONFIRMED_SUCCESS:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.SUCCESS,
+                    notes="Successfully applied and verified via Manual Review pipeline"
+                )
+                return {"success": True, "message": "Application confirmed and successfully verified!"}
+            elif verify_res == VerificationResult.CONFIRMED_FAILURE:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.FAILED,
+                    notes="Application submission failed during manual execution",
+                    reason_code=ReasonCode.PROFILE_INCOMPLETE
+                )
+                return {"success": False, "message": "Application submission failed post-verification."}
+            else:
+                excel_tracker.update_application_status(
+                    job_url,
+                    ApplicationStatus.MANUAL_REVIEW_NEEDED,
+                    notes=f"Submission outcome unconfirmed after attempt {attempt_id}",
+                    reason_code=ReasonCode.SUBMISSION_UNKNOWN
+                )
+                return {"success": False, "message": "Submission outcome unconfirmed. Remains in Manual Review."}
+        except Exception as e:
+            logger.error(f"Error executing manual apply pipeline: {e}")
+            return {"success": False, "message": str(e)}
+        finally:
+            await bot_instance.close_browser()
 
     async def _run_orchestrator(self, config: SearchConfig, profile: ResumeProfile):
         """Sequential platform runner managing Playwright lifecycle."""

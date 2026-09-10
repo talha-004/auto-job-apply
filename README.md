@@ -151,7 +151,36 @@ Before getting started, make sure you have installed:
 
 ---
 
-### 4. Backend Setup & Run
+### 4. 🚀 Single-Command Launcher (Starts All Services)
+
+You can launch **all services (FastAPI Backend, React Frontend, and AI / Ollama)** using a single command:
+
+#### Option A: Cross-Platform Python (Recommended)
+```bash
+python start_all.py
+# or
+npm start
+```
+
+#### Option B: Windows Batch (Opens dedicated windows)
+```cmd
+start_all.bat
+```
+
+#### Option C: Windows PowerShell
+```powershell
+.\start_all.ps1
+```
+
+This automatically:
+- Checks & starts local **Ollama** (or verifies Cloud Gemini in `.env`)
+- Activates the Python virtual environment and starts **FastAPI** on `http://localhost:8000`
+- Starts the React Vite Dashboard on `http://localhost:5173`
+- Gracefully shuts down all services on `Ctrl+C`
+
+---
+
+### 5. Manual Setup & Individual Service Commands
 
 #### In Windows Terminal / Git Bash:
 ```bash

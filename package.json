@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
+    "start": "python start_all.py",
+    "dev": "python start_all.py",
+    "start:windows": "start_all.bat",
     "build": "npm --prefix frontend run build",
-    "preview": "npm --prefix frontend run preview",
-    "start": "npm --prefix frontend run dev"
+    "preview": "npm --prefix frontend run preview"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }

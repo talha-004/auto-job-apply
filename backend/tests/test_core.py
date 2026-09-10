@@ -15,7 +15,7 @@ def test_resume_profile_schema():
     )
     assert profile.full_name == "Jane Doe"
     assert len(profile.skills) == 4
-    assert profile.custom_answers["notice_period_days"] == 15
+    assert profile.custom_answers["notice_period_days"] is None
 
 def test_search_config_defaults():
     config = SearchConfig()

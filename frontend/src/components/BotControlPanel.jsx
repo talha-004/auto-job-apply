@@ -14,7 +14,11 @@ import {
   Eye, 
   EyeOff, 
   FileCheck,
-  AlertCircle
+  AlertCircle,
+  Clock,
+  Zap,
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 
 export const BotControlPanel = () => {
@@ -25,13 +29,31 @@ export const BotControlPanel = () => {
   const [experience, setExperience] = useState(3);
   const [maxApplications, setMaxApplications] = useState(25);
   const [cooldown, setCooldown] = useState(15);
+  const [freshnessDays, setFreshnessDays] = useState(3);
+  const [quickApplyOnly, setQuickApplyOnly] = useState(true);
+  const [minMatchScore, setMinMatchScore] = useState(60);
+  const [matchGatingMode, setMatchGatingMode] = useState('observe');
   const [headless, setHeadless] = useState(false);
   const [dryRun, setDryRun] = useState(false);
 
-  // Sync with parsed profile experience if available
+  // Naukri Profile Headline State
+  const [naukriHeadline, setNaukriHeadline] = useState('');
+  const [updatingHeadline, setUpdatingHeadline] = useState(false);
+  const [headlineMsg, setHeadlineMsg] = useState(null);
+
+  // Sync with parsed profile experience and headline if available
   useEffect(() => {
-    if (profile?.years_of_experience) {
-      setExperience(Math.round(profile.years_of_experience));
+    if (profile) {
+      if (profile.years_of_experience) {
+        setExperience(Math.round(profile.years_of_experience));
+      }
+      if (profile.work_experience?.length > 0 && profile.skills?.length > 0) {
+        const title = profile.work_experience[0].title || 'Software Engineer';
+        const topSkills = profile.skills.slice(0, 4).join(' | ');
+        setNaukriHeadline(`${title} | ${topSkills}`);
+      } else if (profile.summary) {
+        setNaukriHeadline(profile.summary.slice(0, 100));
+      }
     }
   }, [profile]);
 
@@ -43,6 +65,8 @@ export const BotControlPanel = () => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [preflightResult, setPreflightResult] = useState(null);
+  const [checkingPreflight, setCheckingPreflight] = useState(false);
 
   const isRunning = status.state === 'Running';
   const isPaused = status.state === 'Paused';
@@ -50,6 +74,39 @@ export const BotControlPanel = () => {
 
   const handleTogglePlatform = (p) => {
     setPlatforms(prev => ({ ...prev, [p]: !prev[p] }));
+  };
+
+  const handleRunPreflight = async () => {
+    const selectedPlatforms = Object.keys(platforms).filter(p => platforms[p]);
+    setCheckingPreflight(true);
+    try {
+      const res = await botAPI.runPreflight({
+        keywords,
+        location,
+        experience_years: experience ? parseInt(experience, 10) : null,
+        platforms: selectedPlatforms,
+        max_applications: parseInt(maxApplications, 10) || 25,
+        cooldown_seconds: parseInt(cooldown, 10) || 15,
+        freshness_days: freshnessDays,
+        quick_apply_only: quickApplyOnly,
+        min_match_score: parseInt(minMatchScore, 10) || 60,
+        match_gating_mode: matchGatingMode,
+        headless,
+        dry_run: dryRun,
+      });
+      setPreflightResult(res);
+    } catch (err) {
+      console.error('Preflight check failed:', err);
+      setPreflightResult({
+        overall: 'FAILED',
+        passed: false,
+        checks: {
+          system: { status: 'error', message: err.response?.data?.detail || err.message }
+        }
+      });
+    } finally {
+      setCheckingPreflight(false);
+    }
   };
 
   const handleStart = async () => {
@@ -73,6 +130,10 @@ export const BotControlPanel = () => {
         platforms: selectedPlatforms,
         max_applications: parseInt(maxApplications, 10),
         cooldown_seconds: parseFloat(cooldown),
+        freshness_days: freshnessDays !== '' ? parseInt(freshnessDays, 10) : null,
+        quick_apply_only: quickApplyOnly,
+        min_match_score: parseInt(minMatchScore, 10),
+        match_gating_mode: matchGatingMode,
         headless,
         dry_run: dryRun,
       };
@@ -122,6 +183,25 @@ export const BotControlPanel = () => {
     }
   };
 
+  const handleUpdateHeadline = async () => {
+    const trimmed = (naukriHeadline || '').trim();
+    if (!trimmed || trimmed.length < 5 || trimmed.length > 250) {
+      alert('Headline must be between 5 and 250 characters.');
+      return;
+    }
+
+    try {
+      setUpdatingHeadline(true);
+      setHeadlineMsg(null);
+      const res = await botAPI.updateNaukriHeadline(trimmed);
+      setHeadlineMsg({ type: 'success', text: res.message || 'Naukri headline updated successfully!' });
+    } catch (err) {
+      setHeadlineMsg({ type: 'error', text: err.response?.data?.detail || err.message });
+    } finally {
+      setUpdatingHeadline(false);
+    }
+  };
+
   const creds = systemHealth?.credentials_configured || {};
 
   return (
@@ -139,7 +219,7 @@ export const BotControlPanel = () => {
           <div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: '600' }}>Search & Bot Configuration</h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Configure job parameters, target platforms, and stealth options
+              Configure job parameters, freshness filters, and platform automation options
             </p>
           </div>
         </div>
@@ -192,6 +272,25 @@ export const BotControlPanel = () => {
           />
         </div>
 
+        {/* Job Freshness Filter */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Clock size={14} color="var(--primary)" /> Job Freshness
+          </label>
+          <select
+            className="form-input"
+            value={freshnessDays ?? ''}
+            onChange={(e) => setFreshnessDays(e.target.value === '' ? null : parseInt(e.target.value, 10))}
+            disabled={!isIdle}
+            style={{ cursor: isIdle ? 'pointer' : 'default' }}
+          >
+            <option value="">Any Time</option>
+            <option value="1">Last 24 Hours</option>
+            <option value="3">Last 3 Days (Recommended)</option>
+            <option value="7">Last 7 Days</option>
+          </select>
+        </div>
+
         {/* Max Applications */}
         <div className="form-group">
           <label className="form-label">Max Applications</label>
@@ -218,6 +317,40 @@ export const BotControlPanel = () => {
             onChange={(e) => setCooldown(e.target.value)}
             disabled={!isIdle}
           />
+        </div>
+
+        {/* Min Match Score */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Zap size={14} color="var(--primary)" /> Min Match Score (%)
+          </label>
+          <input 
+            type="number"
+            min="0"
+            max="100"
+            step="5"
+            className="form-input" 
+            value={minMatchScore} 
+            onChange={(e) => setMinMatchScore(e.target.value)}
+            disabled={!isIdle}
+          />
+        </div>
+
+        {/* Match Gating Mode */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ShieldCheck size={14} color="var(--primary)" /> Match Gating Mode
+          </label>
+          <select
+            className="form-input"
+            value={matchGatingMode}
+            onChange={(e) => setMatchGatingMode(e.target.value)}
+            disabled={!isIdle}
+            style={{ cursor: isIdle ? 'pointer' : 'default' }}
+          >
+            <option value="observe">Observe (Log & Persist, Don't Skip)</option>
+            <option value="enforce">Enforce (Skip Jobs Below Min Score)</option>
+          </select>
         </div>
       </div>
 
@@ -249,7 +382,7 @@ export const BotControlPanel = () => {
                   <input 
                     type="checkbox"
                     checked={platforms[p]}
-                    onChange={() => {}} // handled by parent div
+                    onChange={() => {}}
                     disabled={!isIdle}
                     style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
                   />
@@ -271,7 +404,7 @@ export const BotControlPanel = () => {
         </div>
       </div>
 
-      {/* Advanced Toggles (Headless & Dry Run) */}
+      {/* Advanced Toggles (Quick Apply, Headless & Dry Run) */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -280,8 +413,21 @@ export const BotControlPanel = () => {
         background: 'rgba(15, 23, 42, 0.4)',
         borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border-color)',
-        marginBottom: '24px'
+        marginBottom: '20px'
       }}>
+        {/* Quick Apply Only */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isIdle ? 'pointer' : 'default', fontSize: '0.8125rem' }}>
+          <input 
+            type="checkbox" 
+            checked={quickApplyOnly} 
+            onChange={(e) => setQuickApplyOnly(e.target.checked)} 
+            disabled={!isIdle}
+            style={{ accentColor: 'var(--primary)' }}
+          />
+          <span><strong style={{ color: 'var(--primary)' }}>Quick Apply Only</strong> (Skip external ATS portals to prevent getting stuck)</span>
+        </label>
+
+        {/* Headless */}
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isIdle ? 'pointer' : 'default', fontSize: '0.8125rem' }}>
           <input 
             type="checkbox" 
@@ -293,6 +439,7 @@ export const BotControlPanel = () => {
           <span><strong>Headless Mode</strong> (Runs silently in background)</span>
         </label>
 
+        {/* Dry Run */}
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isIdle ? 'pointer' : 'default', fontSize: '0.8125rem' }}>
           <input 
             type="checkbox" 
@@ -305,17 +452,80 @@ export const BotControlPanel = () => {
         </label>
       </div>
 
-      {/* Control Actions Bar */}
-      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-        {isIdle && (
-          <button 
-            onClick={handleStart} 
-            disabled={loading || !profile}
-            className="btn btn-primary"
-            style={{ padding: '12px 28px', fontSize: '0.95rem' }}
+      {/* Authenticated Naukri Profile Headline Management */}
+      <div style={{
+        padding: '14px 16px',
+        background: 'rgba(56, 189, 248, 0.05)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid rgba(56, 189, 248, 0.2)',
+        marginBottom: '24px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+            <Sparkles size={14} color="var(--primary)" /> Update Naukri Profile Headline
+          </label>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+            Reuses stored session cookies
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <input 
+            className="form-input"
+            style={{ flex: 1 }}
+            placeholder="e.g. Full Stack Developer | React | Node.js | MongoDB"
+            value={naukriHeadline}
+            onChange={(e) => setNaukriHeadline(e.target.value)}
+            disabled={!isIdle || updatingHeadline}
+          />
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={handleUpdateHeadline}
+            disabled={!isIdle || updatingHeadline || !naukriHeadline.trim()}
+            style={{ whiteSpace: 'nowrap', padding: '10px 18px' }}
           >
-            <Play size={18} fill="currentColor" /> Start Auto-Apply Bot
+            {updatingHeadline ? 'Updating...' : 'Save Headline'}
           </button>
+        </div>
+        {headlineMsg && (
+          <div style={{
+            marginTop: '8px',
+            fontSize: '0.8rem',
+            color: headlineMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            {headlineMsg.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+            {headlineMsg.text}
+          </div>
+        )}
+      </div>
+
+      {/* Control Actions Bar */}
+      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+        {isIdle && (
+          <>
+            <button 
+              onClick={handleStart} 
+              disabled={loading || !profile}
+              className="btn btn-primary"
+              style={{ padding: '12px 28px', fontSize: '0.95rem' }}
+            >
+              <Play size={18} fill="currentColor" /> Start Auto-Apply Bot
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRunPreflight}
+              disabled={checkingPreflight}
+              className="btn btn-outline"
+              style={{ padding: '12px 20px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              <ShieldCheck size={18} color="var(--primary)" />
+              {checkingPreflight ? 'Checking System...' : 'Run Pre-flight Check'}
+            </button>
+          </>
         )}
 
         {isRunning && (
@@ -362,6 +572,77 @@ export const BotControlPanel = () => {
           </>
         )}
       </div>
+
+      {/* Pre-flight Validation Results Box */}
+      {preflightResult && (
+        <div style={{
+          marginTop: '20px',
+          padding: '16px 20px',
+          borderRadius: 'var(--radius-md)',
+          background: preflightResult.overall === 'PASSED' 
+            ? 'rgba(16, 185, 129, 0.08)' 
+            : preflightResult.overall === 'WARNINGS' 
+            ? 'rgba(245, 158, 11, 0.08)' 
+            : 'rgba(239, 68, 68, 0.08)',
+          border: `1px solid ${
+            preflightResult.overall === 'PASSED' 
+              ? 'rgba(16, 185, 129, 0.3)' 
+              : preflightResult.overall === 'WARNINGS' 
+              ? 'rgba(245, 158, 11, 0.3)' 
+              : 'rgba(239, 68, 68, 0.3)'
+          }`
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldCheck size={18} color={
+                preflightResult.overall === 'PASSED' ? 'var(--success)' : preflightResult.overall === 'WARNINGS' ? 'var(--warning)' : 'var(--danger)'
+              } />
+              <strong style={{ fontSize: '0.95rem' }}>Pre-flight Validation Result:</strong>
+              <span style={{
+                padding: '2px 8px',
+                borderRadius: '999px',
+                fontSize: '0.75rem',
+                fontWeight: '700',
+                background: preflightResult.overall === 'PASSED' ? 'rgba(16, 185, 129, 0.2)' : preflightResult.overall === 'WARNINGS' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                color: preflightResult.overall === 'PASSED' ? 'var(--success)' : preflightResult.overall === 'WARNINGS' ? 'var(--warning)' : 'var(--danger)'
+              }}>
+                {preflightResult.overall}
+              </span>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setPreflightResult(null)} 
+              className="btn btn-outline" 
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+            {preflightResult.checks?.profile && (
+              <div style={{ fontSize: '0.8rem', padding: '8px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)' }}>
+                <strong>Candidate Profile:</strong> {preflightResult.checks.profile.message}
+              </div>
+            )}
+            {preflightResult.checks?.storage && (
+              <div style={{ fontSize: '0.8rem', padding: '8px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)' }}>
+                <strong>Storage:</strong> {preflightResult.checks.storage.message}
+              </div>
+            )}
+            {preflightResult.checks?.llm && (
+              <div style={{ fontSize: '0.8rem', padding: '8px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)' }}>
+                <strong>LLM Engine:</strong> {preflightResult.checks.llm.message}
+              </div>
+            )}
+            {preflightResult.checks?.platforms && Object.entries(preflightResult.checks.platforms).map(([plat, pInfo]) => (
+              <div key={plat} style={{ fontSize: '0.8rem', padding: '8px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.03)' }}>
+                <strong style={{ textTransform: 'capitalize' }}>{plat}:</strong> {pInfo.message}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
