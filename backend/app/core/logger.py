@@ -47,6 +47,8 @@ class EventBroadcaster:
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
+        # Always bind to the active FastAPI main loop
+        self.main_loop = asyncio.get_running_loop()
         if self._lock is None:
             self._lock = asyncio.Lock()
         async with self._lock:
@@ -119,7 +121,11 @@ class EventBroadcaster:
             else:
                 asyncio.run_coroutine_threadsafe(self._broadcast(payload), self.main_loop)
         else:
-            await self._broadcast(payload)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._broadcast(payload))
+            except Exception:
+                pass
 
     def get_recent_logs(self, limit: int = 100) -> List[LogMessage]:
         return list(self.log_history)[-limit:]

@@ -12,17 +12,19 @@ import {
 } from 'lucide-react';
 
 export const LiveLogFeed = () => {
-  const { logs } = useBot();
+  const { logs, clearLogs } = useBot();
   const [filterLevel, setFilterLevel] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [autoScroll, setAutoScroll] = useState(true);
-  const logEndRef = useRef(null);
+  const logContainerRef = useRef(null);
 
-  useEffect(() => {
-    if (autoScroll && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = () => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTo({
+        top: logContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
-  }, [logs, autoScroll]);
+  };
 
   const filteredLogs = logs.filter((log) => {
     if (filterLevel !== 'ALL' && log.level !== filterLevel) return false;
@@ -108,22 +110,37 @@ export const LiveLogFeed = () => {
           </select>
 
           <button 
-            onClick={() => setAutoScroll(!autoScroll)}
+            onClick={scrollToBottom}
             className="btn btn-outline"
             style={{
               padding: '6px 10px',
               fontSize: '0.75rem',
-              color: autoScroll ? 'var(--primary)' : 'var(--text-muted)'
+              color: 'var(--text-muted)'
             }}
-            title={autoScroll ? 'Auto-scroll enabled' : 'Auto-scroll disabled'}
+            title="Scroll to latest logs"
           >
             <ArrowDownCircle size={14} />
+          </button>
+
+          <button 
+            onClick={clearLogs}
+            className="btn btn-outline"
+            style={{
+              padding: '6px 10px',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)'
+            }}
+            title="Clear live logs"
+          >
+            <Trash2 size={14} />
           </button>
         </div>
       </div>
 
       {/* Terminal Output */}
-      <div style={{
+      <div 
+        ref={logContainerRef}
+        style={{
         flex: 1,
         background: '#05070a',
         borderRadius: 'var(--radius-md)',
@@ -183,7 +200,6 @@ export const LiveLogFeed = () => {
             </div>
           ))
         )}
-        <div ref={logEndRef} />
       </div>
     </div>
   );

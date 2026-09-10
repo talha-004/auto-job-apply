@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBot } from '../context/BotContext';
 import { botAPI } from '../services/api';
 import { 
@@ -10,6 +10,7 @@ import {
   ShieldCheck, 
   Search, 
   MapPin, 
+  Briefcase,
   Eye, 
   EyeOff, 
   FileCheck,
@@ -21,10 +22,18 @@ export const BotControlPanel = () => {
 
   const [keywords, setKeywords] = useState('Full Stack Developer');
   const [location, setLocation] = useState('Remote');
+  const [experience, setExperience] = useState(3);
   const [maxApplications, setMaxApplications] = useState(25);
   const [cooldown, setCooldown] = useState(15);
   const [headless, setHeadless] = useState(false);
   const [dryRun, setDryRun] = useState(false);
+
+  // Sync with parsed profile experience if available
+  useEffect(() => {
+    if (profile?.years_of_experience) {
+      setExperience(Math.round(profile.years_of_experience));
+    }
+  }, [profile]);
 
   const [platforms, setPlatforms] = useState({
     LinkedIn: true,
@@ -60,6 +69,7 @@ export const BotControlPanel = () => {
       const config = {
         keywords,
         location,
+        experience_years: experience !== '' ? parseInt(experience, 10) : null,
         platforms: selectedPlatforms,
         max_applications: parseInt(maxApplications, 10),
         cooldown_seconds: parseFloat(cooldown),
@@ -160,6 +170,24 @@ export const BotControlPanel = () => {
             placeholder="e.g. Remote, New York, Bengaluru"
             value={location} 
             onChange={(e) => setLocation(e.target.value)}
+            disabled={!isIdle}
+          />
+        </div>
+
+        {/* Experience */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Briefcase size={14} color="var(--primary)" /> Experience (Years)
+          </label>
+          <input 
+            type="number"
+            min="0"
+            max="30"
+            step="1"
+            className="form-input" 
+            placeholder="e.g. 3"
+            value={experience} 
+            onChange={(e) => setExperience(e.target.value)}
             disabled={!isIdle}
           />
         </div>

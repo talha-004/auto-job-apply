@@ -1,5 +1,7 @@
 import asyncio
 import urllib.parse
+from typing import Optional
+from playwright.async_api import Page
 from app.core.config import settings
 from app.core.logger import broadcaster, logger
 from app.models.job import PlatformEnum, ApplicationStatus, LogLevel
@@ -95,17 +97,58 @@ class NaukriPlatform(BasePlatform):
             await broadcaster.emit_log(f"Naukri login error: {e}", level=LogLevel.ERROR, platform=self.platform_name.value)
             return False
 
+    async def handle_naukri_chatbot(self, job_page: Page, job_title: str, company: str) -> bool:
+        """Iteratively answer questions and advance Naukri's Quick Apply chatbot drawer."""
+        max_rounds = 5
+        round_count = 0
+        while round_count < max_rounds:
+            round_count += 1
+            chat_modal = await job_page.query_selector(".chatbot_Drawer, .apply-drawer, div[class*='chatbot']")
+            if not chat_modal or not await chat_modal.is_visible():
+                break
+
+            # 1. Fill standard inputs using local AI
+            await self.fill_form_with_llm(job_title, company, target_page=job_page, container=chat_modal)
+
+            # 2. Click any interactive choice chips (e.g. Yes/No, Notice Period chips)
+            chips = await chat_modal.query_selector_all(".chip, .option-chip, .radio-chip, li.chip, .bot-option")
+            for chip in chips:
+                try:
+                    if await chip.is_visible():
+                        chip_text = (await chip.inner_text()).lower()
+                        # Prefer affirmative or standard choices
+                        if any(w in chip_text for w in ["yes", "immediate", "15 days", "1 month", "full time"]):
+                            await chip.click()
+                            await asyncio.sleep(1)
+                            break
+                except Exception:
+                    pass
+
+            # 3. Look for Submit / Save / Next inside chatbot
+            advance_btn = await chat_modal.query_selector("button:has-text('Submit'), button:has-text('Apply'), button:has-text('Save'), .save-btn, button:has-text('Next')")
+            if advance_btn and await advance_btn.is_visible():
+                await advance_btn.click()
+                await asyncio.sleep(2)
+            else:
+                break
+        return True
+
     async def search_and_apply(self) -> int:
-        """Search jobs on Naukri and apply automatically."""
+        """Search jobs on Naukri and apply automatically with smart filtering and external portal support."""
         keywords_slug = self.config.keywords.lower().replace(" ", "-")
         location_slug = self.config.location.lower().replace(" ", "-")
         
-        if location_slug:
-            search_url = f"{self.base_url}/{keywords_slug}-jobs-in-{location_slug}?k={urllib.parse.quote(self.config.keywords)}&l={urllib.parse.quote(self.config.location)}"
+        # Smart search URL construction with experience filter
+        exp_param = f"&experience={self.config.experience_years}" if self.config.experience_years is not None else ""
+        if location_slug and location_slug != "remote":
+            search_url = f"{self.base_url}/{keywords_slug}-jobs-in-{location_slug}?k={urllib.parse.quote(self.config.keywords)}&l={urllib.parse.quote(self.config.location)}{exp_param}"
+        elif location_slug == "remote":
+            search_url = f"{self.base_url}/{keywords_slug}-jobs?k={urllib.parse.quote(self.config.keywords)}&wfhType=0{exp_param}"
         else:
-            search_url = f"{self.base_url}/{keywords_slug}-jobs?k={urllib.parse.quote(self.config.keywords)}"
+            search_url = f"{self.base_url}/{keywords_slug}-jobs?k={urllib.parse.quote(self.config.keywords)}{exp_param}"
 
-        await broadcaster.emit_log(f"Searching Naukri: '{self.config.keywords}' in '{self.config.location}'...", platform=self.platform_name.value)
+        exp_log = f" with {self.config.experience_years} YOE" if self.config.experience_years is not None else ""
+        await broadcaster.emit_log(f"Searching Naukri: '{self.config.keywords}' in '{self.config.location}'{exp_log}...", platform=self.platform_name.value)
 
         try:
             await self.page.goto(search_url, wait_until="domcontentloaded", timeout=35000)
@@ -154,16 +197,23 @@ class NaukriPlatform(BasePlatform):
                     company = (await company_elem.inner_text()).strip() if company_elem else "Tech Firm"
                     job_link = await title_elem.get_attribute("href") if title_elem else self.page.url
 
-                    # Check title relevance
+                    # 1. Quick check if already marked as 'Applied' directly on the card badge
+                    applied_badge = await tuple_elem.query_selector(".applied, span:has-text('Applied'), .already-applied, .applied-tag")
+                    if applied_badge and await applied_badge.is_visible():
+                        await broadcaster.emit_log(f"Skipping already applied job on card: {job_title} at {company}", platform=self.platform_name.value)
+                        continue
+
+                    # 2. Check title relevance (skipping conflicting stacks like Java full stack when searching for React)
                     if not self.is_title_relevant(job_title):
                         await broadcaster.emit_log(
-                            f"Skipping role: '{job_title}' at {company} (does not match target stack '{self.config.keywords}')",
+                            f"Skipping non-matching role: '{job_title}' at {company} (conflicts with target stack '{self.config.keywords}')",
                             platform=self.platform_name.value
                         )
                         continue
 
+                    # 3. Check Excel deduplication
                     if excel_tracker.is_already_applied(job_link):
-                        await broadcaster.emit_log(f"Skipping already applied Naukri job: {job_title} at {company}", platform=self.platform_name.value)
+                        await broadcaster.emit_log(f"Skipping already recorded Naukri job: {job_title} at {company}", platform=self.platform_name.value)
                         continue
 
                     # Open job details in new tab
@@ -189,39 +239,14 @@ class NaukriPlatform(BasePlatform):
 
                         ext_page = None
                         try:
-                            # Catch popup if new tab opens, or stay in current page
                             async with self.context.expect_page(timeout=7000) as page_info:
                                 await apply_btn.click()
                             ext_page = await page_info.value
                         except Exception:
-                            # If no new tab opened, check if job_page navigated
                             ext_page = job_page
 
                         if ext_page:
-                            try:
-                                await ext_page.wait_for_load_state("domcontentloaded", timeout=15000)
-                            except Exception:
-                                pass
-                            await asyncio.sleep(3)
-
-                            # If there is an introductory "Apply Now" button on external portal, click it
-                            ext_apply_btn = await ext_page.query_selector("button:has-text('Apply for this job'), button:has-text('Apply Now'), a:has-text('Apply Now'), a:has-text('Apply for this job'), #apply-button, .apply-button")
-                            if ext_apply_btn and await ext_apply_btn.is_visible():
-                                try:
-                                    await ext_apply_btn.click()
-                                    await asyncio.sleep(2)
-                                except Exception:
-                                    pass
-
-                            # Auto-fill external application form using local LLM
-                            await broadcaster.emit_log(f"🤖 Scanning and auto-filling form fields with local AI on {company}...", platform=self.platform_name.value)
-                            await self.fill_form_with_llm(job_title, company, target_page=ext_page)
-
-                            if not self.config.dry_run:
-                                ext_submit_btn = await ext_page.query_selector("button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit'), input[type='submit']")
-                                if ext_submit_btn and await ext_submit_btn.is_visible():
-                                    await ext_submit_btn.click()
-                                    await asyncio.sleep(2)
+                            await self.apply_external_portal(ext_page, job_title, company)
 
                         applied_count += 1
                         status = ApplicationStatus.DRY_RUN_COMPLETED if self.config.dry_run else ApplicationStatus.SUCCESS
@@ -238,14 +263,8 @@ class NaukriPlatform(BasePlatform):
                         if not self.config.dry_run:
                             await apply_btn.click()
                             await asyncio.sleep(2)
-
-                            # Handle chatbot questionnaire if opens
-                            chat_modal = await job_page.query_selector(".chatbot_Drawer, .apply-drawer")
-                            if chat_modal:
-                                await self.fill_form_with_llm(job_title, company, target_page=job_page, container=chat_modal)
-                                submit_chat = await chat_modal.query_selector("button:has-text('Submit'), button:has-text('Apply')")
-                                if submit_chat:
-                                    await submit_chat.click()
+                            # Handle interactive chatbot questionnaire if opened
+                            await self.handle_naukri_chatbot(job_page, job_title, company)
 
                         applied_count += 1
                         status = ApplicationStatus.DRY_RUN_COMPLETED if self.config.dry_run else ApplicationStatus.SUCCESS

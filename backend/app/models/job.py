@@ -72,6 +72,7 @@ class ResumeProfile(BaseModel):
 class SearchConfig(BaseModel):
     keywords: str = "Full Stack Developer"
     location: str = "Remote"
+    experience_years: Optional[int] = None
     platforms: List[PlatformEnum] = Field(default_factory=lambda: [PlatformEnum.LINKEDIN, PlatformEnum.NAUKRI, PlatformEnum.INDEED, PlatformEnum.DINDIN])
     max_applications: int = 25
     cooldown_seconds: float = 15.0

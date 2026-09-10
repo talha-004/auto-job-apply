@@ -77,6 +77,17 @@ export const BotProvider = ({ children }) => {
     }
   }, []);
 
+  const refreshLogs = useCallback(async () => {
+    try {
+      const logData = await botAPI.getLogs(100);
+      if (Array.isArray(logData) && logData.length > 0) {
+        setLogs(logData);
+      }
+    } catch (e) {
+      console.error('Error fetching logs:', e);
+    }
+  }, []);
+
   // WebSocket Live Logs
   useEffect(() => {
     let ws = null;
@@ -84,7 +95,6 @@ export const BotProvider = ({ children }) => {
       ws = createLogWebSocket(
         (logEntry) => {
           setLogs((prev) => [...prev.slice(-400), logEntry]);
-          // When a log indicates an application was recorded or status changed, update table & status
           if (logEntry.level === 'SUCCESS' || logEntry.level === 'ACTION' || logEntry.level === 'WARNING') {
             refreshJobsAndStats();
             refreshStatus();
@@ -109,14 +119,20 @@ export const BotProvider = ({ children }) => {
     refreshStatus();
     refreshJobsAndStats();
     refreshSystemHealth();
+    refreshLogs();
 
     const interval = setInterval(() => {
       refreshStatus();
       refreshJobsAndStats();
-    }, 4000);
+      refreshLogs();
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [refreshProfile, refreshStatus, refreshJobsAndStats, refreshSystemHealth]);
+  }, [refreshProfile, refreshStatus, refreshJobsAndStats, refreshSystemHealth, refreshLogs]);
+
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
 
   return (
     <BotContext.Provider
@@ -125,6 +141,8 @@ export const BotProvider = ({ children }) => {
         profile,
         profileLoading,
         logs,
+        setLogs,
+        clearLogs,
         jobs,
         stats,
         systemHealth,
@@ -133,6 +151,7 @@ export const BotProvider = ({ children }) => {
         refreshStatus,
         refreshJobsAndStats,
         refreshSystemHealth,
+        refreshLogs,
       }}
     >
       {children}

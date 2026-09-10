@@ -69,20 +69,34 @@ class BasePlatform(ABC):
         launch_args = [
             "--disable-blink-features=AutomationControlled",
             "--disable-infobars",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-accelerated-2d-canvas",
             "--no-first-run",
-            "--no-zygote",
-            "--disable-gpu",
+            "--window-position=0,0",
             "--window-size=1920,1080"
         ]
 
-        self.browser = await self.playwright.chromium.launch(
-            headless=self.config.headless,
-            args=launch_args,
-            slow_mo=50
+        logger.info(
+            "Launching browser: headless=%s, browser=playwright-chromium",
+            self.config.headless
+        )
+
+        try:
+            self.browser = await self.playwright.chromium.launch(
+                headless=self.config.headless,
+                args=launch_args,
+                slow_mo=50,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to launch Playwright Chromium | headless=%s",
+                self.config.headless,
+            )
+            raise
+
+        mode_text = "headless mode" if self.config.headless else "visible mode"
+        await broadcaster.emit_log(
+            f"🌐 Browser launched in {mode_text}",
+            level=LogLevel.INFO,
+            platform=self.platform_name.value
         )
 
         context_options = {
@@ -106,6 +120,11 @@ class BasePlatform(ABC):
         await self._load_cookies()
 
         self.page = await self.context.new_page()
+        if not self.config.headless:
+            try:
+                await self.page.bring_to_front()
+            except Exception:
+                pass
 
         if HAS_STEALTH:
             try:
@@ -347,6 +366,72 @@ class BasePlatform(ABC):
             logger.warning(f"Error scanning form fields: {e}")
             return []
 
+    async def upload_resume_copy(self, page: Page) -> bool:
+        """Explicitly find and attach candidate resume PDF copy to the page or form."""
+        if not self.resume_file_path or not self.resume_file_path.exists():
+            return False
+
+        try:
+            # 1. Search all file input elements on page (visible or hidden)
+            file_inputs = await page.query_selector_all("input[type='file']")
+            if file_inputs:
+                for file_input in file_inputs:
+                    try:
+                        await file_input.set_input_files(str(self.resume_file_path))
+                        await broadcaster.emit_log(
+                            f"📄 Attached resume copy: {self.resume_file_path.name}",
+                            level=LogLevel.SUCCESS,
+                            platform=self.platform_name.value
+                        )
+                        return True
+                    except Exception:
+                        continue
+
+            # 2. Check all iframe frames for file inputs
+            for frame in page.frames:
+                try:
+                    frame_inputs = await frame.query_selector_all("input[type='file']")
+                    for f_in in frame_inputs:
+                        await f_in.set_input_files(str(self.resume_file_path))
+                        await broadcaster.emit_log(
+                            f"📄 Attached resume copy inside frame: {self.resume_file_path.name}",
+                            level=LogLevel.SUCCESS,
+                            platform=self.platform_name.value
+                        )
+                        return True
+                except Exception:
+                    continue
+
+            # 3. Check for custom dropzones or upload buttons that open file choosers
+            upload_triggers = [
+                "button:has-text('Upload Resume')",
+                "button:has-text('Attach Resume')",
+                "button:has-text('Upload CV')",
+                "a:has-text('Upload Resume')",
+                "div[class*='resume-upload']",
+                "div[class*='dropzone']",
+                "div[data-automation-id*='file-upload']"
+            ]
+            for trigger in upload_triggers:
+                try:
+                    btn = await page.query_selector(trigger)
+                    if btn and await btn.is_visible():
+                        async with page.expect_file_chooser(timeout=3000) as fc_info:
+                            await btn.click()
+                        file_chooser = await fc_info.value
+                        await file_chooser.set_files(str(self.resume_file_path))
+                        await broadcaster.emit_log(
+                            f"📄 Attached resume copy via file chooser: {self.resume_file_path.name}",
+                            level=LogLevel.SUCCESS,
+                            platform=self.platform_name.value
+                        )
+                        return True
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Error uploading resume copy: {e}")
+        return False
+
     async def fill_form_with_llm(
         self,
         job_title: str,
@@ -354,7 +439,7 @@ class BasePlatform(ABC):
         target_page: Optional[Page] = None,
         container: Optional[ElementHandle] = None
     ) -> bool:
-        """Scan form fields, request LLM mapping, and fill inputs accurately."""
+        """Scan form fields, request LLM mapping with heuristic fallback, and fill inputs accurately."""
         page = target_page or self.page
         if not page:
             return False
@@ -366,32 +451,79 @@ class BasePlatform(ABC):
         job_context = {"title": job_title, "company": company}
         profile_dict = self.profile.model_dump()
 
-        mapping = await llm_client.map_form_fields(profile_dict, fields, job_context)
-        logger.info(f"LLM field mapping for {job_title}: {mapping}")
+        # Step 1: Request LLM field mapping
+        mapping = {}
+        try:
+            mapping = await llm_client.map_form_fields(profile_dict, fields, job_context)
+            logger.info(f"LLM field mapping for {job_title}: {mapping}")
+        except Exception as e:
+            logger.warning(f"LLM mapping error (using heuristic fallback): {e}")
 
-        scope = container or page
+        # Step 2: Instant smart heuristic fallback for any missed fields
+        for field in fields:
+            f_id = field.get("id")
+            f_name = field.get("name")
+            combined = f"{field.get('label', '')} {f_name} {field.get('placeholder', '')}".lower()
+
+            if f_id not in mapping and f_name not in mapping:
+                if any(w in combined for w in ["first name", "firstname", "given name", "first_name"]):
+                    val = self.profile.full_name.split()[0] if self.profile.full_name else ""
+                    mapping[f_id] = val
+                elif any(w in combined for w in ["last name", "lastname", "surname", "family name", "last_name"]):
+                    parts = self.profile.full_name.split() if self.profile.full_name else []
+                    mapping[f_id] = parts[-1] if len(parts) > 1 else ""
+                elif any(w in combined for w in ["full name", "your name", "candidate name", "name"]):
+                    mapping[f_id] = self.profile.full_name
+                elif any(w in combined for w in ["email", "e-mail"]):
+                    mapping[f_id] = self.profile.email
+                elif any(w in combined for w in ["phone", "mobile", "contact", "cell", "tel"]):
+                    mapping[f_id] = self.profile.phone
+                elif "linkedin" in combined:
+                    mapping[f_id] = self.profile.linkedin_url or ""
+                elif "github" in combined:
+                    mapping[f_id] = self.profile.github_url or ""
+                elif any(w in combined for w in ["portfolio", "website", "site", "url"]):
+                    mapping[f_id] = self.profile.portfolio_url or ""
+                elif any(w in combined for w in ["location", "city", "address"]):
+                    mapping[f_id] = self.profile.location or ""
+                elif any(w in combined for w in ["experience", "years of exp", "total exp"]):
+                    mapping[f_id] = str(self.profile.years_of_experience)
+                elif any(w in combined for w in ["notice", "notice period"]):
+                    mapping[f_id] = "Immediate"
+
+        # Step 3: Populate each field using direct DOM handles
         for field in fields:
             await self.check_pause_and_stop()
+            field_idx = field.get("index", 0)
             field_id = field.get("id")
             field_name = field.get("name")
             field_type = field.get("type", "text").lower()
             field_tag = field.get("tag", "input").lower()
 
             target_val = mapping.get(field_id) or mapping.get(field_name)
-            if target_val is None:
-                continue
 
             try:
-                selector = f"#{field_id}" if field_id and not field_id.startswith("field_") else f"[name='{field_name}']"
-                elem = await scope.query_selector(selector)
-                if not elem or not await elem.is_visible():
+                # Retrieve exact element via DOM index
+                js_getter = """(idx) => {
+                    const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea');
+                    return inputs[idx] || null;
+                }"""
+                elem_handle = await page.evaluate_handle(js_getter, field_idx)
+                elem = elem_handle.as_element()
+                if not elem:
                     continue
 
                 if field_type == "file":
+                    # File upload works on hidden inputs as well!
                     if self.resume_file_path and self.resume_file_path.exists():
                         await elem.set_input_files(str(self.resume_file_path))
                         await broadcaster.emit_log(f"📎 Attached resume file: {self.resume_file_path.name}", platform=self.platform_name.value)
-                elif field_type in ["checkbox"]:
+                    continue
+
+                if target_val is None or target_val == "":
+                    continue
+
+                if field_type in ["checkbox"]:
                     should_check = bool(target_val)
                     is_checked = await elem.is_checked()
                     if should_check != is_checked:
@@ -402,15 +534,117 @@ class BasePlatform(ABC):
                     try:
                         await elem.select_option(label=str(target_val))
                     except Exception:
-                        await elem.select_option(value=str(target_val))
+                        try:
+                            await elem.select_option(value=str(target_val))
+                        except Exception:
+                            pass
                 else: # text, email, tel, number, textarea
-                    await self.human_type(elem, str(target_val))
+                    try:
+                        await elem.click()
+                        await elem.fill(str(target_val))
+                    except Exception:
+                        await self.human_type(elem, str(target_val))
                 
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.15)
             except Exception as e:
                 logger.warning(f"Could not fill field {field_id}: {e}")
 
         return True
+
+    async def apply_external_portal(self, page: Page, job_title: str, company: str) -> bool:
+        """
+        Universally traverse, scan, auto-fill and submit an external company portal application
+        (Workday, Greenhouse, Lever, SmartRecruiters, Taleo, Ashby, Jobvite, direct forms).
+        """
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            await asyncio.sleep(3)
+            
+            # Step 1: Check for introductory "Apply" / "Apply Now" buttons
+            apply_triggers = [
+                "button:has-text('Apply for this job')",
+                "a:has-text('Apply for this job')",
+                "button:has-text('Apply Now')",
+                "a:has-text('Apply Now')",
+                "button:has-text('Apply with Resume')",
+                "button:has-text('Apply')",
+                "#apply-button",
+                ".apply-button",
+                "a[href*='apply']"
+            ]
+            for trigger in apply_triggers:
+                try:
+                    btn = await page.query_selector(trigger)
+                    if btn and await btn.is_visible():
+                        await broadcaster.emit_log(f"Opening external application form on {company}...", platform=self.platform_name.value)
+                        await btn.click()
+                        await asyncio.sleep(2)
+                        break
+                except Exception:
+                    continue
+
+            # Scroll page down to trigger lazy-loaded sections
+            try:
+                await page.mouse.wheel(0, 500)
+                await asyncio.sleep(1)
+            except Exception:
+                pass
+
+            max_steps = 3
+            current_step = 0
+
+            while current_step < max_steps:
+                current_step += 1
+                await self.check_pause_and_stop()
+
+                # Check for CAPTCHA on external page
+                for indicator in ["iframe[src*='recaptcha']", "iframe[src*='hcaptcha']", "div.g-recaptcha", "#challenge-running"]:
+                    try:
+                        captcha_el = await page.query_selector(indicator)
+                        if captcha_el and await captcha_el.is_visible():
+                            await broadcaster.emit_log("⚠️ CAPTCHA detected on external site! Pausing for manual user resolution...", level=LogLevel.WARNING, platform=self.platform_name.value)
+                            if self.pause_event:
+                                self.pause_event.clear()
+                            await self.check_pause_and_stop()
+                    except Exception:
+                        pass
+
+                # Explicitly upload resume copy if upload zones / file inputs exist
+                await self.upload_resume_copy(page)
+
+                # Scan and fill all fields on current step
+                fields = await self.scan_form_fields(target_page=page)
+                if fields:
+                    await broadcaster.emit_log(f"🤖 Auto-filling {len(fields)} form fields with local AI for {company}...", platform=self.platform_name.value)
+                    await self.fill_form_with_llm(job_title, company, target_page=page)
+
+                # Check for "Next" / "Continue" vs final "Submit"
+                next_btn = await page.query_selector("button:has-text('Next'), button:has-text('Continue'), input[value='Next'], input[value='Continue']")
+                submit_btn = await page.query_selector("button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit'), input[type='submit'], button:has-text('Send Application'), button:has-text('Apply')")
+
+                if next_btn and await next_btn.is_visible() and (not submit_btn or not await submit_btn.is_visible()):
+                    await broadcaster.emit_log(f"Proceeding to next step on {company} application...", platform=self.platform_name.value)
+                    if not self.config.dry_run:
+                        await next_btn.click()
+                        await asyncio.sleep(3)
+                        continue
+
+                # If final submit is available
+                if submit_btn and await submit_btn.is_visible():
+                    if not self.config.dry_run:
+                        await broadcaster.emit_log(f"Submitting final application to {company}...", level=LogLevel.ACTION, platform=self.platform_name.value)
+                        await submit_btn.click()
+                        await asyncio.sleep(3)
+                    return True
+
+                if fields:
+                    return True
+                break
+
+            return True
+        except Exception as e:
+            logger.warning(f"External application error for {company}: {e}")
+            return False
 
     def record_job_result(
         self,

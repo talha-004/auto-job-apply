@@ -90,9 +90,10 @@ class ExcelTracker:
         """Check if job URL has already been recorded."""
         if not job_url:
             return False
-        clean_url = job_url.strip().split("?")[0] # normalize query params
+        clean_url = job_url.strip().split("?")[0].split("#")[0].rstrip("/")
         for applied in self._applied_urls:
-            if applied.strip().split("?")[0] == clean_url:
+            applied_clean = applied.strip().split("?")[0].split("#")[0].rstrip("/")
+            if applied_clean == clean_url:
                 return True
         return False
 
