@@ -43,7 +43,12 @@ def check_ai_service():
 
     if has_gemini:
         print("\033[92m[AI]\033[0m Cloud Gemini API key detected in .env.")
-    elif ollama_exe:
+        ai_model = "qwen2.5-coder:7b"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("OLLAMA_MODEL="):
+                    ai_model = line.split("=", 1)[1].strip()
+
         print("\033[93m[AI]\033[0m Ollama executable found. Checking if Ollama serve is active...")
         try:
             import urllib.request
@@ -53,9 +58,18 @@ def check_ai_service():
             print("\033[93m[AI]\033[0m Starting local Ollama server in background...")
             try:
                 subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(2)
                 print("\033[92m[AI]\033[0m Ollama service started.")
             except Exception as e:
                 print(f"\033[91m[AI]\033[0m Could not start Ollama: {e}")
+
+        # Automatically load and warm up AI model
+        try:
+            print(f"\033[94m[AI]\033[0m Pre-warming AI Model ({ai_model}) into memory...")
+            subprocess.Popen(["ollama", "run", ai_model, ""], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"\033[92m[AI]\033[0m AI Model ({ai_model}) is resident in memory and ready.")
+        except Exception as e:
+            print(f"\033[93m[AI]\033[0m Could not preload model {ai_model}: {e}")
     else:
         print("\033[93m[AI]\033[0m Note: Configure GEMINI_API_KEY in .env or install Ollama for questionnaire solving.")
 
