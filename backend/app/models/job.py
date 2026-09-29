@@ -200,7 +200,7 @@ class DiscoveredJob(BaseModel):
     raw_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class DiscoveryConfig(BaseModel):
-    """Configuration parameters for fast multi-board job scraping."""
+    """Configuration parameters for fast multi-board job scraping and search optimization."""
     keywords: str = "Full Stack Developer"
     location: str = "India"
     platforms: List[str] = Field(default_factory=lambda: ["linkedin", "indeed", "glassdoor", "zip_recruiter"])
@@ -208,6 +208,10 @@ class DiscoveryConfig(BaseModel):
     hours_old: int = 72
     country_indeed: str = "india"
     is_remote: Optional[bool] = None
+    query_expansion: bool = True
+    negative_keywords: List[str] = Field(default_factory=list)
+    experience_level: Optional[str] = None
+    min_salary: Optional[float] = None
 
 class JobEvaluationResult(BaseModel):
     """Consolidated job evaluation outcome produced by JobEvaluator."""

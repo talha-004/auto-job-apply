@@ -65,22 +65,50 @@ class EmailAutoResponderService:
         role: Optional[str] = None,
         application_id: Optional[str] = None,
         action_link: Optional[str] = None,
-        interview_time: Optional[str] = None
+        interview_time: Optional[str] = None,
+        tone: str = "professional",
+        custom_slots: Optional[List[str]] = None
     ) -> RSVPDraft:
         """
         Synthesizes a personalized RSVP draft and pushes an approval alert to Telegram.
+        Supports tone variations ('professional', 'concise', 'enthusiastic') and custom availability.
         """
         recruiter_name = self._extract_recruiter_name(sender)
         resolved_role = role or "Software Engineer"
         candidate_name = getattr(settings, "CANDIDATE_NAME", "Syed Talha Ahmed")
 
-        suggested_slots = [
+        suggested_slots = custom_slots or [
             "Tomorrow between 2:00 PM – 4:00 PM EST",
             "Wednesday between 10:00 AM – 1:00 PM EST",
             "Thursday between 1:00 PM – 4:00 PM EST"
         ]
 
-        if action_link:
+        if tone == "concise":
+            if action_link:
+                body = (
+                    f"Hi {recruiter_name},\n\n"
+                    f"Thank you for getting back to me! I have confirmed my availability via your link ({action_link}). "
+                    f"Looking forward to our call.\n\n"
+                    f"Best,\n{candidate_name}"
+                )
+            elif interview_time:
+                body = (
+                    f"Hi {recruiter_name},\n\n"
+                    f"Thank you. {interview_time} works perfectly for me. "
+                    f"Please send the meeting invitation at your convenience.\n\n"
+                    f"Best,\n{candidate_name}"
+                )
+            else:
+                body = (
+                    f"Hi {recruiter_name},\n\n"
+                    f"Thank you for reaching out regarding the {resolved_role} position. I would be happy to connect. "
+                    f"I am available:\n"
+                    f"  • {suggested_slots[0]}\n"
+                    f"  • {suggested_slots[1]}\n\n"
+                    f"Looking forward to speaking.\n\n"
+                    f"Best,\n{candidate_name}"
+                )
+        elif action_link:
             body = (
                 f"Hi {recruiter_name},\n\n"
                 f"Thank you for getting back to me regarding the {resolved_role} position at {company}! "

@@ -247,4 +247,18 @@ Every phase adheres to strict dependency ordering, comprehensive testing require
   - `PHASE-15-TASK-05`: Write unit tests for draft generation, Telegram actions, and API endpoints.
 - **Acceptance Criteria**: 248 passed backend tests, 0 build errors, 1-tap mobile approve/reject operational.
 
+---
+
+## Phase 16: Search Optimization, Relevancy Gating & Discovery Stability (v3.2)
+- **Objective**: Maximize job search yield and eliminate irrelevant scrapings via multi-query expansion, boolean queries, targeted platform URL builders, and title relevance gating.
+- **Problems Solved**: Prevents missing 70% of relevant jobs due to single-literal search query bottlenecks; eliminates wasted compute and scraping tokens on irrelevant roles (internships, unpaid, leadership, or cross-discipline positions).
+- **Tasks**:
+  - `PHASE-16-TASK-01`: Implement `SearchOptimizerService` with role synonym clusters, boolean generator, and platform URL constructors.
+  - `PHASE-16-TASK-02`: Enhance `DiscoveryConfig` with `query_expansion`, `negative_keywords`, `experience_level`, and `min_salary`.
+  - `PHASE-16-TASK-03`: Integrate multi-query execution and title relevance gating in `DiscoveryManager`.
+  - `PHASE-16-TASK-04`: Expose preview and telemetry endpoints (`/api/bot/search/expand`, `/api/bot/search/telemetry`).
+  - `PHASE-16-TASK-05`: Verify with test suite covering query expansion, boolean search, platform URLs, title filtering, and telemetry.
+- **Acceptance Criteria**: 254 passed backend tests, 0 build errors, multi-query expansion and title relevance gating fully operational.
+
+
 

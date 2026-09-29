@@ -78,13 +78,47 @@ async def run_preflight_with_config(config: SearchConfig) -> Dict[str, Any]:
 async def discover_jobs_endpoint(config: Optional[DiscoveryConfig] = None) -> Dict[str, Any]:
     """Rapidly discover jobs across multiple platforms via fast HTTP endpoints."""
     from app.services.discovery.discovery_manager import discovery_manager
+    from app.services.discovery.search_optimizer import search_optimizer
     cfg = config or DiscoveryConfig()
     jobs = await discovery_manager.discover_jobs(cfg)
+    latest_telemetry = search_optimizer.get_recent_telemetry(limit=1)
     return {
         "success": True,
         "count": len(jobs),
+        "telemetry": latest_telemetry[0].model_dump() if latest_telemetry else None,
         "jobs": [j.model_dump() for j in jobs]
     }
+
+
+@router.get("/search/expand")
+async def preview_search_expansion(
+    keywords: str = "Python Developer",
+    location: str = "Remote",
+    is_remote: bool = True
+):
+    """Previews high-yield query expansions, boolean expressions, and platform URLs."""
+    from app.services.discovery.search_optimizer import search_optimizer
+    expansions = search_optimizer.expand_queries(keywords)
+    boolean_query = search_optimizer.build_boolean_search(keywords)
+    urls = {
+        "linkedin": search_optimizer.build_platform_search_url("linkedin", keywords, location, is_remote),
+        "indeed": search_optimizer.build_platform_search_url("indeed", keywords, location, is_remote),
+        "naukri": search_optimizer.build_platform_search_url("naukri", keywords, location, is_remote)
+    }
+    return {
+        "base_query": keywords,
+        "expanded_queries": expansions,
+        "boolean_expression": boolean_query,
+        "platform_urls": urls
+    }
+
+
+@router.get("/search/telemetry")
+async def get_search_telemetry(limit: int = 10):
+    """Retrieves recent search yield and relevancy filtering telemetry."""
+    from app.services.discovery.search_optimizer import search_optimizer
+    return search_optimizer.get_recent_telemetry(limit=limit)
+
 
 
 # --- Autonomous Scheduler Endpoints ---

@@ -8,13 +8,13 @@
 
 | Metric | Status |
 |---|---|
-| **Current Phase** | **Phase 15 — Mobile 2-Way Command Center & Recruiter RSVP Auto-Responder** |
+| **Current Phase** | **Phase 16 — Search Optimization, Relevancy Gating & Discovery Stability** |
 | **Current Task** | Complete |
-| **Completed Phases** | 15 / 15 |
-| **Remaining Phases** | 0 / 15 |
+| **Completed Phases** | 16 / 16 |
+| **Remaining Phases** | 0 / 16 |
 | **Blocked Tasks** | 0 |
-| **Overall Completion** | **100% (v2.0 + v3.0 + v3.1 Efficiency Suite Certified)** |
-| **Last Updated** | **2026-09-29T23:55:00+05:30** |
+| **Overall Completion** | **100% (Search Intelligence & Stability Suite Certified)** |
+| **Last Updated** | **2026-09-30T00:06:00+05:30** |
 
 ---
 
@@ -309,5 +309,30 @@
   - `python -m pytest backend/tests/test_email_auto_responder.py`: 6 passed.
   - `python -m pytest backend/tests/test_telegram_companion.py`: 9 passed.
   - Full Regression Suite: **248 passed, 0 failed** in 106.72s.
+
+---
+
+### Phase 16: Search Optimization, Relevancy Gating & Discovery Stability (v3.2)
+- **Status**: **COMPLETED**
+- **Goals**: Implement high-yield multi-query expansion, boolean query construction, targeted platform URL generation, pre-scraping title relevance gating, and yield telemetry tracking.
+- **Completed Tasks**:
+  - `PHASE-16-TASK-01`: Built `SearchOptimizerService` (`app/services/discovery/search_optimizer.py`) with role synonyms, boolean query generation, platform-specific URL builders (`linkedin`, `indeed`, `naukri`), and `SearchTelemetry` metrics.
+  - `PHASE-16-TASK-02`: Enhanced `DiscoveryConfig` with `query_expansion`, `negative_keywords`, `experience_level`, and `min_salary`.
+  - `PHASE-16-TASK-03`: Integrated `SearchOptimizerService` into `DiscoveryManager` (`app/services/discovery/discovery_manager.py`) with multi-query execution, title relevance gating, and telemetry recording.
+  - `PHASE-16-TASK-04`: Added `/api/bot/search/expand` and `/api/bot/search/telemetry` endpoints in `backend/app/api/endpoints/bot.py`.
+  - `PHASE-16-TASK-05`: Verified with unit and integration tests (`test_search_optimizer.py` — 6 passed, `test_discovery.py` — 6 passed). Full regression suite: **254 passed, 0 failed** in 97.26s across 38 test files.
+- **Files Created**:
+  - `backend/app/services/discovery/search_optimizer.py`
+  - `backend/tests/test_search_optimizer.py`
+- **Files Modified**:
+  - `backend/app/models/job.py`
+  - `backend/app/services/discovery/discovery_manager.py`
+  - `backend/app/api/endpoints/bot.py`
+  - `backend/app/services/email_auto_responder.py`
+- **Tests Executed**:
+  - `python -m pytest backend/tests/test_search_optimizer.py`: 6 passed.
+  - `python -m pytest backend/tests/test_discovery.py`: 6 passed.
+  - Full Regression Suite: **254 passed, 0 failed** in 97.26s across 38 test files.
+
 
 
