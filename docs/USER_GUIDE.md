@@ -8,7 +8,7 @@ Welcome to **AutoApplyJobs**! This guide is written for everyday candidates who 
 
 You have three easy ways to launch AutoApplyJobs depending on what you are doing:
 
-### Method A: Full-Stack Interactive Launcher (Recommended for First-Time Setup)
+### Method A: Full-Stack Interactive Launcher (Recommended for Daily Use)
 1. Double-click **`start_all.bat`** in the project folder.
 2. **What happens automatically**:
    - ✅ **Auto-loads AI Model**: Detects Ollama on your computer, starts the Ollama server in the background, and immediately loads your local AI model (`qwen2.5-coder:7b`) into memory so answers generate instantly.
@@ -47,7 +47,7 @@ AutoApplyJobs is **not** a dumb form spammer. It is a full career agent that act
 ```mermaid
 flowchart TD
     A["1. Discovery & Search"] -->|Multi-Query Expansion| B["2. Title & Negative Filtering"]
-    B -->|Passed Relevance| C["3. Fact-Ledger Verification"]
+    B -->|Passed Relevance Gate| C["3. Candidate Fact Ledger"]
     C -->|Zero Hallucination| D["4. Tailored Resume Generation"]
     D -->|Match Score ≥ 70%| E["5. Policy & Safety Engine"]
     E -->|Approved / Supervised| F["6. Humanized Form Submission"]
@@ -84,137 +84,173 @@ flowchart TD
 
 ---
 
-## 🖥️ Part 3: Dashboard Walkthrough (Every UI Element Explained)
+## 🖥️ Part 3: Dashboard Walkthrough (Exact UI Breakdown)
 
-When you open `http://localhost:5173`, you will see a sleek, dark-mode command center. Here is what every tab, button, and card does:
+When you open `http://localhost:5173`, you will see a sleek, dark-mode command center. Here is the exact structure matching the actual application components:
 
 ---
 
-### 1. Top Status & Navigation Bar
-- **AutoApplyJobs Logo**: Indicates the system is active.
+### 1. Header & Navigation Bar (`Navbar.jsx`)
+
+Located at the very top of your screen:
+- **Brand Title**: `AutoApplyJobs` with an `AUTONOMOUS AI` cyan pill and subtitle *"Enterprise Agent with Local AI & Scheduler"*.
 - **5 Navigation Tabs**:
-  - **Dashboard**: Main control center for starting jobs and watching live logs.
-  - **Analytics**: Visual conversion funnel showing applied, reviewed, and interview stages.
-  - **Action Center**: Pre-submit approval queue, manual intervention tickets, and recruiter outreach drafts. A red badge `(3)` shows items awaiting your attention.
-  - **QA Vault**: Your personal database of interview answers (notice period, visa, salary, etc.).
-  - **Scheduler**: Set 9-to-5 business hours, morning run time, and daily caps.
-- **Top Metrics Pills**:
-  - **Total Applications**: Lifetime applications submitted.
-  - **Today's Applications**: Applications submitted today vs. your daily cap (e.g. `4 / 25`).
-  - **Interview Stage**: Applications that have progressed to interviews.
-  - **Queue Pending**: Applications awaiting pre-submit review or CAPTCHA solving.
+  1. 📊 **Bot Dashboard**: Main workspace for configuring search, uploading resumes, watching live logs, and viewing applied jobs.
+  2. 📈 **Funnel & Analytics**: Visual conversion funnel and success rates across all platforms.
+  3. 🛡️ **Interventions**: The human-in-the-loop action center (shows a red badge count e.g. `[3]` when reviews, tickets, or outreach drafts need attention).
+  4. 🗄️ **QA Vault**: Your personal database of interview answers (notice period, visa, salary, etc.).
+  5. ⏰ **Scheduler**: Set 9-to-5 business hours, morning hunt schedule, and daily caps.
+- **System Status Indicators (Top Right)**:
+  - **Ollama Status Box**: Shows `Ollama: qwen2.5-coder:7b` with a green glowing pulsing dot if local AI is online (or red if offline).
+  - **Bot State Badge**: Displays current engine state: `IDLE`, `RUNNING`, `PAUSED`, or `STOPPED`.
 
 ---
 
-### 2. Tab 1: Dashboard View
+### 2. Status & Metrics Row (`StatusIndicator.jsx`)
 
-The Dashboard is divided into three sections:
-
-#### A. Left Column — Resume Profile & Bot Controls
-- **Resume Uploader Card**:
-  - **Upload PDF / DOCX**: Drag-and-drop your master resume. The system automatically extracts your skills, work history, education, and contact details.
-  - **Fact Ledger Verification Drawer**: Displays verified atomic facts. You can verify or edit your skills so the AI knows what is 100% true.
-  - **Tailoring Templates**: Choose your preferred PDF resume visual style (Classic, Modern, Minimal).
-- **Bot Control Panel Card**:
-  - **Keyword Input**: e.g., `Full Stack Developer, Python, React`.
-  - **Location Input**: e.g., `Remote` or `New York, NY`.
-  - **Platform Checkboxes**: Select which platforms to target (`LinkedIn`, `Naukri`, `Indeed`, `Workday`, `Greenhouse`, `Lever`).
-  - **Max Applications Slider**: Limits how many applications to send in one run (e.g., `10`).
-  - **Autonomy Mode Selector**:
-    - **Assist**: Fills out forms, pauses before submission, and waits for your approval.
-    - **Supervised**: Auto-submits high-match jobs; pauses for approval on sensitive questions (salary, visa).
-    - **Autonomous**: Fully automated background submission for verified-fact matches.
-  - **Headless Mode Toggle**: Turn ON for silent invisible execution; turn OFF if you want to watch the Chromium browser open and type.
-  - **Dry Run Toggle**: Tests discovery and form filling without actually pressing the final "Submit" button.
-  - **`Start Application Run` Button**: Launches the job search and application runner.
-  - **`Pause` / `Resume` / `Stop` Buttons**: Temporarily pause or terminate active browser workers.
-
-#### B. Right Column — Live WebSocket Terminal (`LiveLogFeed`)
-- Real-time color-coded terminal logs:
-  - 🟢 **[INFO]**: Normal progress (job found, form page opened, field filled).
-  - 🟡 **[WARNING]**: Non-critical notices (skipped duplicate job, daily cap limit).
-  - 🔴 **[ERROR]**: Actionable issues (network disconnect, session expired).
-  - 🟣 **[AI]**: LLM reasoning and screening question answers.
-- **Clear Logs** & **Auto-Scroll** buttons.
-
-#### C. Bottom Full-Width Table — Job Applications (`JobApplicationsTable`)
-- Every job found or applied appears in this live table:
-  - **Company & Job Title**: Direct link to the original job posting.
-  - **Platform**: `LINKEDIN`, `NAUKRI`, `INDEED`, `WORKDAY`, `GREENHOUSE`, `LEVER`.
-  - **Match Score**: 0% to 100% suitability rating.
-  - **Status Badge**: `APPLIED`, `INTERVIEW_SCHEDULED`, `UNDER_REVIEW`, `REJECTED`, or `FAILED`.
-  - **Applied Date**: Exact timestamp.
-  - **Actions**:
-    - **`Prepare Interview` Button**: Opens the **AI Mock Interview Coach** for that specific job!
+Located directly below the header:
+- **CAPTCHA / 2FA Action Banner**:
+  - Only appears if a platform presents a bot verification puzzle or SMS OTP.
+  - Displays a yellow alert banner: *"Manual User Action Required: A CAPTCHA or 2FA challenge was detected. Solve it in your browser window, then click Resume."*
+  - Has a **`Resume Bot Now`** button that instantly unpauses the bot after you solve it.
+- **4 Real-Time Metrics Cards**:
+  1. 📨 **Total Tracked Applications**: Total lifetime jobs recorded in your database.
+  2. ✅ **Submitted Successfully**: Jobs successfully applied with confirmation receipts (green).
+  3. ⚠️ **Manual Review Needed**: Applications held in the review queue or requiring user answers (amber).
+  4. ⚡ **Active Session Progress**: Current run progress (e.g. `4 / 25 Target`) accompanied by an animated progress bar.
 
 ---
 
-### 3. AI Mock Interview Coach Modal (Opened from Job Table)
-When you click **Prepare Interview** on any job row:
-- **Company & Role Dossier**: Strategic intelligence about the employer, role responsibilities, and expected tech stack.
-- **10 Tailored Technical Questions**: Deep-dive questions likely to be asked in the technical interview.
-- **STAR Behavioral Stories**: Situation-Task-Action-Result talking points generated from your real resume experience.
-- **Interactive Practice Studio**: Type your practice answer, and the AI evaluates your response with a 1–10 clarity score and improvement feedback.
+### 3. Tab 1: Bot Dashboard View
+
+When the **Bot Dashboard** tab is selected, the page is laid out in two upper columns plus a full-width bottom table:
+
+#### A. Left Column — Upper Section: Resume Profile (`ResumeUploader.jsx`)
+- **Upload Dropzone**: Drop your PDF or DOCX resume here. The system parses your contact details, education, work history, and skills automatically.
+- **Parsed Profile Display**: Shows your Name, Email, Phone, Location, and skill tags.
+- **`Edit Profile` Button**: Allows manual editing of your contact details, adding new skills, or removing outdated tags.
+- **`View Full Profile Details` (Collapsible)**: Expand to inspect extracted work experience bullets, college degrees, and personal projects.
+
+#### B. Left Column — Lower Section: Search & Bot Configuration (`BotControlPanel.jsx`)
+- **Job Title / Keywords**: Target role titles (e.g. `Full Stack Developer, Python`).
+- **Location**: Desired job location (e.g. `Remote`, `New York`, `Bengaluru`).
+- **Experience (Years)**: Minimum experience level filter (auto-synced from your resume).
+- **Job Freshness**: Dropdown filter (`Any Time`, `Last 24 Hours`, `Last 3 Days (Recommended)`, `Last 7 Days`).
+- **Max Applications**: Maximum jobs to submit in this run (e.g. `25`).
+- **Cooldown Between Jobs (sec)**: Jitter pause between submissions (default: `15s`) to mimic human behavior.
+- **Min Match Score (%)**: Minimum threshold (default: `60%` or `70%`) for a job to be considered.
+- **Match Gating Mode**:
+  - `Observe`: Logs the score and persists the job, but doesn't skip it.
+  - `Enforce`: Automatically skips any job scoring below your minimum match score.
+- **Target Job Platforms**:
+  - Checkboxes for **LinkedIn**, **Naukri**, **Indeed**, and **Dindin**.
+  - Shows a green `Ready` badge if platform credentials exist in `.env`, or grey `No .env` badge.
+- **Advanced Toggles**:
+  - **Quick Apply Only**: Skips external multi-step redirects, focusing only on fast 1-click apply jobs.
+  - **Headless Mode**: When checked, runs silently in the background without opening browser windows.
+  - **Dry Run Mode**: Fills forms completely but does **NOT** click the final submit button.
+- **Update Naukri Profile Headline**:
+  - Enter a professional headline (e.g. `Full Stack Developer | React | Node.js | MongoDB`).
+  - Click **`Save Headline`** to update your live Naukri profile using stored session cookies.
+- **Control Buttons**:
+  - **`Start Auto-Apply Bot`** (Green): Launches the job search and application runner.
+  - **`Run Pre-flight Check`** (Blue Outline): Runs a pre-flight test verifying your browser, credentials, and network before applying.
+  - **`Pause Bot`** / **`Stop Bot`**: Appear dynamically while the bot is active.
+
+#### C. Right Column: Live Terminal Feed (`LiveLogFeed.jsx`)
+- Real-time color-coded WebSocket log output:
+  - 🟢 **`[INFO]`**: Standard milestones (*Navigating to LinkedIn, Job parsed, Form field filled*).
+  - 🟡 **`[WARNING]`**: Non-critical warnings (*Duplicate job skipped, Daily cap reached*).
+  - 🔴 **`[ERROR]`**: Issues needing attention (*Session expired, Network timeout*).
+  - 🟣 **`[AI]`**: AI thought reasoning while answering questionnaire dropdowns.
+- Header actions: **`Auto-Scroll` toggle** and **`Clear Logs`** trash button.
+
+#### D. Bottom Full-Width Table: Applications Record (`JobApplicationsTable.jsx`)
+- Complete historical record of every job touched:
+  - **Search & Filter Bar**:
+    - Search input (searches job title, company, notes, reason codes).
+    - Platform filter dropdown (`All Platforms`, `LinkedIn`, `Naukri`, `Indeed`, `Dindin`).
+    - Status filter dropdown (`All Statuses`, `Manual Review Queue`, `Success / Applied`, `Failed`).
+    - **`Download Excel Tracking (.xlsx)`** button: Exports an Excel file formatted for your job hunt records.
+  - **Table Columns**:
+    1. **Timestamp**: Exact date and time processed.
+    2. **Platform**: Platform badge (`LinkedIn`, `Naukri`, `Indeed`, etc.).
+    3. **Job Title & Company**: Target role title, company name, and internal Job ID.
+    4. **Status**: Color badge (`Applied`, `Review Needed`, `Dry Run`, `Failed`).
+    5. **Match**: Semantic match score badge (`92%`, `78%`, etc.).
+    6. **Quality**: ⭐ Job Quality rating percentage.
+    7. **Priority**: 🔥 Application Priority rating percentage.
+    8. **Recruiter / Contact**: Recruiter name and clickable HR email with a 1-click copy button.
+    9. **Reason / Notes**: Reason codes, skip reasons, or verification notes.
+    10. **Action / Link**:
+        - For standard jobs: Click **`View ↗`** to open the real job posting, or click **`📄 Resume`** to download the tailored PDF generated for that exact role!
+        - For manual review jobs: Click **`⚡ Apply Now`**, **`✓ Applied`**, or **`✕ Dismiss`**.
 
 ---
 
-### 4. Tab 2: Analytics & Conversion Funnel (`ConversionFunnel`)
-- **Visual Funnel Chart**:
-  - `Discovered` ➔ `Eligible (Match ≥ 70%)` ➔ `Applied` ➔ `Interview Invites` ➔ `Offers`.
-- **Key Performance Indicators**:
-  - **Interview Conversion Rate**: Percentage of applications resulting in interview invites.
-  - **ATS Pass Rate**: Percentage of applications scoring above the 70% match threshold.
-  - **Top Skills in Demand**: Most frequent keywords requested by employers.
+### 4. Tab 2: Funnel & Analytics (`ConversionFunnel.jsx`)
+- **Conversion Funnel Visualization**:
+  $$\text{Discovered} \longrightarrow \text{Eligible (Match } \ge 70\%) \longrightarrow \text{Applied} \longrightarrow \text{Interviews} \longrightarrow \text{Offers}$$
+- **Key Metrics**:
+  - **Interview Conversion Rate**: Percentage of applications leading to recruiter contact.
+  - **ATS Compatibility Rate**: How often candidate resumes score above the 70% threshold.
+  - **Platform Breakdown**: Bar charts comparing success rates between LinkedIn, Naukri, and Indeed.
 
 ---
 
-### 5. Tab 3: Action Center (`InterventionCenter`)
-This tab gathers everything that needs human review:
-- **Pre-Submit Review Queue**:
-  - Shows jobs held for approval in Assist or Supervised mode.
-  - Displays the exact questionnaire answers the AI plans to submit.
-  - Click **`Approve & Submit`** or **`Reject & Skip`**.
-- **Manual Intervention Tickets**:
-  - If a website presents a CAPTCHA or two-factor SMS OTP, an intervention ticket appears here with a direct browser link or input field.
-- **Recruiter Outreach Drafts**:
-  - Displays drafted LinkedIn connection messages and emails.
-  - Click **`Send Note`** to dispatch or **`Edit`** to adjust the message.
+### 5. Tab 3: Interventions (`InterventionCenter.jsx`)
+This center houses 3 internal sub-tabs:
+1. 📋 **Review Queue Sub-tab**:
+   - Shows jobs held in Assist or Supervised mode before submission.
+   - Lets you inspect the exact answers drafted by the AI.
+   - Action buttons: **`Apply Now`**, **`Mark Applied`**, **`Dismiss`**.
+2. 📨 **Recruiter Outreach Sub-tab**:
+   - Lists drafted LinkedIn connection notes (<300 characters), cold emails, and WhatsApp messages.
+   - Filter by `DRAFTED`, `SENT`, or `ALL`.
+   - Action buttons: **`Send Note`**, **`Preview`**, or **`Edit`**.
+3. 🧪 **Screening Sandbox Sub-tab**:
+   - An interactive test bench: type any screening question (e.g. *"How many years of experience do you have with AWS?"*), select question type (`text`, `radio`, `dropdown`), and click **`Test AI Answer`**.
+   - See how the AI solves it, verify the answer, and click **`Save to QA Vault`** so the answer is permanently memorized!
 
 ---
 
-### 6. Tab 4: QA Vault Editor (`QAVaultEditor`)
-The QA Vault is your permanent answer bank for common application questions:
-- **Work Authorization**: "Are you legally authorized to work in the country?" (`Yes / No`).
-- **Visa Sponsorship**: "Will you now or in the future require visa sponsorship?" (`Yes / No`).
-- **Notice Period**: "What is your official notice period?" (e.g. `Immediate`, `15 Days`, `1 Month`).
-- **Salary Expectations**: Minimum and target salary numbers (USD / INR).
-- **Custom Q&A List**: Add custom question patterns and your preferred answers so the bot never has to guess.
+### 6. Tab 4: QA Vault (`QAVaultEditor.jsx`)
+Your persistent answer database for application screening questions:
+- **Work Authorization**: Legal authorization to work in the country (`Yes / No`).
+- **Visa Sponsorship**: Future visa sponsorship requirement (`Yes / No`).
+- **Notice Period**: Availability window (`Immediate`, `15 Days`, `1 Month`, etc.).
+- **Salary Expectations**: Minimum and Target salary values (in USD or INR).
+- **Custom Question & Answer Pairs**:
+  - Add custom question patterns and your approved answer.
+  - Delete or modify saved answers at any time.
+  - Click **`Save QA Vault`** to persist changes across all platforms.
 
 ---
 
-### 7. Tab 5: Scheduler Settings (`SchedulerSettings`)
-Configure unattended background execution:
-- **Daily Application Cap**: Maximum applications to submit per day (e.g. `20` or `25` to keep accounts safe).
-- **9-to-5 Business Hours Guard**: When turned ON, the bot will automatically pause outside 9:00 AM – 5:00 PM and on weekends.
-- **Morning Hunt Schedule**: Set the exact time (e.g., `09:30 AM`) for the daily autonomous application loop to run.
-- **Profile Freshness Heartbeat**: Periodically updates your profile headline on job boards to keep your profile at the top of recruiter searches.
+### 7. Tab 5: Scheduler (`SchedulerSettings.jsx`)
+Manage unattended background runs:
+- **Scheduler Status Box**: Displays whether the background scheduler is currently `ACTIVE` or `STOPPED`.
+- **Morning Hunt Time**: Set the daily hour (`09`) and minute (`00`) for the morning application run.
+- **Headline Refresh Interval**: Set how often (every `6` hours) to refresh your profile headline on job boards.
+- **Daily Application Cap**: Hard safety ceiling on applications per day (default: `25`).
+- **Actions**: **`Start Scheduler`**, **`Stop Scheduler`**, and **`Save Configuration`**.
 
 ---
 
 ## 📱 Part 4: Mobile Telegram Remote Control (Bonus)
 
-You can connect your Telegram app so you never have to check your laptop during the day:
-1. When a job needs your review, your phone buzzes with:
-   - **Role & Company**
-   - **Match Score**
-   - **Inline Buttons**: `[✅ Approve & Submit]` and `[❌ Reject & Skip]`.
-2. Tap the button directly on your phone, and the bot immediately resumes and submits the application.
-3. Available Telegram slash commands:
-   - `/status` — Check if the bot is active.
-   - `/today` — View today's application count.
-   - `/review` — View pending applications.
-   - `/outreach` — View pending recruiter follow-ups.
-   - `/pause` / `/resume` — Pause or resume the application runner.
+If you configure Telegram in `.env`:
+- When an application needs your approval, your phone buzzes with:
+  - **Role & Company**
+  - **Match Score**
+  - Inline Buttons: `[✅ Approve & Submit]` and `[❌ Reject & Skip]`.
+- Tap the button on your phone, and the bot immediately submits the application from your laptop without you having to open the web dashboard.
+- Commands you can send to your bot on Telegram:
+  - `/status` — Check system health.
+  - `/today` — Today's application metrics.
+  - `/review` — View pending applications awaiting signoff.
+  - `/outreach` — View pending recruiter connection notes.
+  - `/pause` / `/resume` — Pause or resume the application scheduler.
 
 ---
 
