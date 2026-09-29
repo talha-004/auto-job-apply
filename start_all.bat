@@ -1,22 +1,28 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 title AutoApplyJobs — All Services Launcher
 
 echo ==========================================================
 echo       AutoApplyJobs — Launching Full-Stack Services
 echo ==========================================================
 
-:: 1. Detect AI model from .env or fallback to qwen2.5-coder:7b
+:: 1. Detect AI model from backend\.env, root .env, or fallback to qwen2.5-coder:7b
 set "AI_MODEL=qwen2.5-coder:7b"
-if exist "%~dp0.env" (
-    for /f "usebackq tokens=1,2 delims==" %%A in ("%~dp0.env") do (
+if exist "%~dp0backend\.env" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0backend\.env") do (
         if "%%A"=="OLLAMA_MODEL" (
             set "AI_MODEL=%%B"
-            :: Remove possible surrounding whitespace
-            for /f "tokens=*" %%T in ("!AI_MODEL!") do set "AI_MODEL=%%T"
+        )
+    )
+) else if exist "%~dp0.env" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env") do (
+        if "%%A"=="OLLAMA_MODEL" (
+            set "AI_MODEL=%%B"
         )
     )
 )
+:: Trim possible quotes or leading/trailing whitespace
+for /f "tokens=*" %%T in ("!AI_MODEL!") do set "AI_MODEL=%%T"
 
 :: 2. Check and automatically start AI service (Ollama)
 where ollama >nul 2>nul
@@ -48,6 +54,9 @@ if exist "%~dp0venv\Scripts\python.exe" (
 echo.
 echo [BACKEND] Starting FastAPI on http://localhost:8000 ...
 start "AutoApplyJobs Backend" cmd /k "cd /d "%~dp0backend" && "%PYTHON_EXE%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+echo [BACKEND] Waiting for API initialization...
+powershell -NoProfile -Command "Start-Sleep -Seconds 3" >nul 2>&1
 
 echo.
 echo [FRONTEND] Starting React Dashboard on http://localhost:5173 ...

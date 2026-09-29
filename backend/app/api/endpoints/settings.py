@@ -9,6 +9,11 @@ router = APIRouter()
 async def get_system_status() -> Dict[str, Any]:
     """Check health of Ollama LLM, platform credential status, and environment readiness."""
     llm_health = await llm_client.check_health()
+    # Provide top-level convenience properties for UI indicators
+    ollama_info = llm_health.get("providers", {}).get("ollama", {})
+    llm_health["online"] = ollama_info.get("online", False)
+    llm_health["configured_model"] = ollama_info.get("configured_model", settings.OLLAMA_MODEL)
+    llm_health["model_ready"] = ollama_info.get("model_ready", False)
     
     credentials_status = {
         "LinkedIn": bool(settings.LINKEDIN_EMAIL and settings.LINKEDIN_PASSWORD),

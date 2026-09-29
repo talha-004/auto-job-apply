@@ -125,6 +125,7 @@ export const BotProvider = ({ children }) => {
       refreshStatus();
       refreshJobsAndStats();
       refreshLogs();
+      refreshSystemHealth();
     }, 3000);
 
     return () => clearInterval(interval);

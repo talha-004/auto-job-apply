@@ -5,8 +5,16 @@ import { Bot, Cpu, Sparkles, ShieldCheck, AlertCircle, ShieldAlert, Database, Cl
 export const Navbar = ({ activeTab = 'dashboard', onSelectTab, interventionCount = 0 }) => {
   const { systemHealth, status } = useBot();
 
-  const ollamaOnline = systemHealth?.llm?.online;
-  const configuredModel = systemHealth?.llm?.configured_model || 'qwen2.5-coder:7b';
+  const ollamaProvider = systemHealth?.llm?.providers?.ollama;
+  const ollamaOnline = Boolean(
+    ollamaProvider?.online ||
+    systemHealth?.llm?.online ||
+    (systemHealth?.llm?.unified_ready && systemHealth?.llm?.primary_provider === 'ollama')
+  );
+  const configuredModel =
+    ollamaProvider?.configured_model ||
+    systemHealth?.llm?.configured_model ||
+    'qwen2.5-coder:7b';
 
   const navItems = [
     { id: 'dashboard', label: 'Bot Dashboard', icon: LayoutDashboard },
