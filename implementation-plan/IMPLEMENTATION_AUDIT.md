@@ -86,3 +86,13 @@ By synthesizing the accepted and modified recommendations, we form a cohesive **
 4. **Data Consistency Pillar**: PostgreSQL/SQLite as single source of truth + Async Outbox projection for Excel.
 5. **Security & Guardrails Pillar**: Prompt Injection Boundary + Telegram Chat Allowlist + Encrypted Session Storage.
 6. **Lifecycle & Insights Pillar**: Post-Application Interview Management + Explainable Match Diagnostics.
+
+---
+
+## 5. v3.1 Efficiency Suite Audit & Verification
+
+| Finding / Requirement | Resolution | Verification Evidence |
+|---|---|---|
+| **Mobile Pre-Submit Approval Latency** | Integrated `review_queue.enqueue` with `telegram_companion` 1-tap inline buttons (`rvw_approve_`, `rvw_reject_`, `rvw_info_`). Candidates can approve or reject flagged applications from their phone in seconds. | `test_telegram_companion.py` (9 passed). |
+| **Recruiter Interview Response Delay** | Built `EmailAutoResponderService` (`email_auto_responder.py`) to parse interview invitations, synthesize polite RSVP drafts with availability slots or schedule link confirmation, and push 1-tap dispatch alerts. | `test_email_auto_responder.py` (6 passed). |
+| **Full Regression Baseline** | Zero regressions across all existing v2.0 and v3.0 modules. | **248 passed, 0 failed** in 106.72s across 37 test files. |

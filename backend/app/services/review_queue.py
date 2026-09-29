@@ -51,6 +51,27 @@ class ReviewQueueService:
             created_at=datetime.utcnow(),
         )
         self._queue[item.review_id] = item
+
+        # Automatically notify Telegram Companion with 1-tap interactive approval buttons
+        try:
+            import asyncio
+            from app.services.telegram_bot import telegram_companion
+            alert = telegram_companion.format_review_alert(
+                review_id=item.review_id,
+                job_title=job_title,
+                company=company,
+                platform=platform,
+                match_score=match_score,
+                answers_count=len(answers)
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(telegram_companion.send_message(alert["text"], alert["reply_markup"]))
+            except RuntimeError:
+                pass
+        except Exception:
+            pass
+
         return item
 
     def list_pending(self) -> List[ReviewItem]:

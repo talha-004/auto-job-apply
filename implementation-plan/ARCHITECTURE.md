@@ -219,6 +219,10 @@ Replaces the coarse 5-state machine with resilient, verifiable steps:
 #### I. Vision-Assisted Coordinate Fallback Solver
 - For stubborn Shadow DOM trees or custom canvas widgets, calculates viewport bounding boxes and executes stealth Bézier mouse movement clicks.
 
+#### J. Mobile 2-Way Command Center & Recruiter Email RSVP Auto-Responder
+- **1-Tap Pre-Submit Mobile Review**: Instant interactive Telegram notifications with `[Approve & Submit]`, `[Reject & Skip]`, and `[View Details]` inline buttons, seamlessly resolving items in `ReviewQueueService` from a smartphone.
+- **Recruiter Email RSVP Auto-Responder**: Automatically drafts personalized, polite RSVP confirmation emails upon interview invitation detection, negotiates candidate availability slots or confirms scheduling links, and enables 1-tap dispatch via Telegram or web dashboard.
+
 ---
 
 ## 5. Security and Trust Boundaries

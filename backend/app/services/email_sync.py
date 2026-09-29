@@ -140,6 +140,27 @@ class EmailSyncService:
                 status_updated = True
                 logger.info(f"[EmailSync] Auto-recorded technical assessment for application {matched_app_id}")
 
+        # When an interview invitation is detected, automatically synthesize an RSVP draft
+        if classification.intent == RecruiterEmailIntent.INTERVIEW_INVITATION:
+            try:
+                from app.services.email_auto_responder import email_auto_responder
+                role_title = None
+                if matched_app_id:
+                    app_rec = interview_pipeline_service.get(matched_app_id)
+                    if app_rec:
+                        role_title = app_rec.job_title
+                await email_auto_responder.generate_rsvp_draft(
+                    email_id=f"email_{len(self.history) + 1}",
+                    sender=sender,
+                    company=company or "Company",
+                    role=role_title,
+                    application_id=matched_app_id,
+                    action_link=classification.action_link,
+                    interview_time=self.extract_interview_datetime(clean_body)
+                )
+            except Exception as e:
+                logger.warning(f"[EmailSync] Failed to generate automated RSVP draft: {e}")
+
         record = ClassifiedEmailRecord(
             id=f"email_{len(self.history) + 1}",
             sender=sender,

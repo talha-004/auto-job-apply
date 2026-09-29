@@ -37,6 +37,7 @@ class ApplicationLifecycleRecord(BaseModel):
     interviews: List[InterviewRound] = Field(default_factory=list)
     offer_salary: Optional[str] = None
     rejection_reason: Optional[str] = None
+    notes: Optional[str] = None
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -47,6 +48,9 @@ class InterviewPipelineService:
     @property
     def records(self) -> Dict[str, ApplicationLifecycleRecord]:
         return self._records
+
+    def get(self, application_id: str) -> Optional[ApplicationLifecycleRecord]:
+        return self._records.get(application_id)
 
     def get_or_create(self, application_id: str, company: Optional[str] = None, job_title: Optional[str] = None) -> ApplicationLifecycleRecord:
         if application_id not in self._records:

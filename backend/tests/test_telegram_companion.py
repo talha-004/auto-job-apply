@@ -121,3 +121,94 @@ def test_mobile_companion_endpoints(client: TestClient):
     assert webhook_resp.status_code == 200
     assert webhook_resp.json()["ok"] is True
     assert webhook_resp.json()["action_result"]["action"] == "APPROVED"
+
+
+def test_format_review_alert():
+    service = TelegramCompanionService()
+    alert = service.format_review_alert(
+        review_id="rvw_123",
+        job_title="Staff AI Engineer",
+        company="Anthropic",
+        platform="linkedin",
+        match_score=0.92,
+        answers_count=3
+    )
+
+    assert "Staff AI Engineer" in alert["text"]
+    assert "Anthropic" in alert["text"]
+    assert "92%" in alert["text"]
+    assert "3" in alert["text"]
+
+    keyboard = alert["reply_markup"]["inline_keyboard"]
+    assert len(keyboard) == 2
+    assert keyboard[0][0]["callback_data"] == "rvw_approve_rvw_123"
+    assert keyboard[0][1]["callback_data"] == "rvw_reject_rvw_123"
+    assert keyboard[1][0]["callback_data"] == "rvw_info_rvw_123"
+
+
+@pytest.mark.asyncio
+async def test_review_queue_telegram_actions():
+    from app.services.review_queue import review_queue
+    review_queue.clear()
+
+    item = review_queue.enqueue(
+        job_title="ML Infra Lead",
+        company="Cohere",
+        platform="greenhouse",
+        job_url="https://jobs.cohere.com/1",
+        match_score=0.88,
+        answers=[{"q": "Years of experience?", "a": "6"}]
+    )
+
+    service = TelegramCompanionService()
+
+    # Test /review command
+    cmd_reply = await service.handle_command("/review")
+    assert "ML Infra Lead" in cmd_reply
+    assert "Cohere" in cmd_reply
+    assert item.review_id in cmd_reply
+
+    # Test rvw_info callback
+    info_res = await service.handle_callback_query(f"rvw_info_{item.review_id}")
+    assert info_res["success"] is True
+    assert info_res["action"] == "REVIEW_INFO"
+    assert "ML Infra Lead" in info_res["message"]
+
+    # Test rvw_approve callback
+    appr_res = await service.handle_callback_query(f"rvw_approve_{item.review_id}")
+    assert appr_res["success"] is True
+    assert appr_res["action"] == "REVIEW_APPROVED"
+    assert item.status == "APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_rsvp_telegram_actions():
+    from app.services.email_auto_responder import email_auto_responder
+    email_auto_responder.clear()
+
+    draft = await email_auto_responder.generate_rsvp_draft(
+        email_id="tg_test_email",
+        sender="Elena Rostova <elena@palantir.com>",
+        company="Palantir",
+        role="Forward Deployed Engineer"
+    )
+
+    service = TelegramCompanionService()
+
+    # Test /drafts command
+    drafts_reply = await service.handle_command("/drafts")
+    assert "Palantir" in drafts_reply
+    assert draft.draft_id in drafts_reply
+
+    # Test rsvp_view callback
+    view_res = await service.handle_callback_query(f"rsvp_view_{draft.draft_id}")
+    assert view_res["success"] is True
+    assert view_res["action"] == "RSVP_VIEW"
+    assert "Palantir" in view_res["message"]
+
+    # Test rsvp_send callback
+    send_res = await service.handle_callback_query(f"rsvp_send_{draft.draft_id}")
+    assert send_res["success"] is True
+    assert send_res["action"] == "RSVP_SENT"
+    assert draft.status == "SENT"
+

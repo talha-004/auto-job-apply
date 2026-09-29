@@ -234,3 +234,17 @@ Every phase adheres to strict dependency ordering, comprehensive testing require
   - `PHASE-14-TASK-03`: Complete sign-off in `PRODUCTION_CERTIFICATION.md`.
 - **Acceptance Criteria**: 239 passed backend tests, 0 build errors, and synchronized documentation.
 
+---
+
+## Phase 15: Mobile 2-Way Review & Recruiter RSVP Auto-Responder (v3.1 Efficiency Suite)
+- **Objective**: Accelerate candidate decision-making via 1-tap mobile application approval and zero-touch recruiter RSVP draft dispatch.
+- **Problems Solved**: Eliminates the delay of opening the laptop to approve flagged applications; eliminates the manual friction of drafting polite recruiter interview replies.
+- **Tasks**:
+  - `PHASE-15-TASK-01`: Implement `EmailAutoResponderService` to synthesize tailored, polite RSVP emails with candidate availability slots.
+  - `PHASE-15-TASK-02`: Enhance `TelegramCompanionService` with `format_review_alert`, `/review` & `/drafts` slash commands, and inline button callbacks (`rvw_approve_`, `rvw_reject_`, `rsvp_send_`).
+  - `PHASE-15-TASK-03`: Wire `ReviewQueueService.enqueue` to auto-push 1-tap mobile review notifications.
+  - `PHASE-15-TASK-04`: Create REST endpoints for RSVP draft review and dispatch (`/api/email/rsvp-drafts`).
+  - `PHASE-15-TASK-05`: Write unit tests for draft generation, Telegram actions, and API endpoints.
+- **Acceptance Criteria**: 248 passed backend tests, 0 build errors, 1-tap mobile approve/reject operational.
+
+
