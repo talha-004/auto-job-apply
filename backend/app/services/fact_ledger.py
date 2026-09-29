@@ -142,6 +142,9 @@ class FactLedgerService:
                 )
             )
 
+    def add_fact(self, fact: CandidateFact) -> None:
+        self.ledger.add_fact(fact)
+
     def query_skill(self, skill_name: str) -> Optional[CandidateFact]:
         return self.ledger.get_fact(skill_name, category=FactCategory.TECHNICAL_SKILL)
 
@@ -150,3 +153,7 @@ class FactLedgerService:
         if fact and fact.numeric_value is not None:
             return fact.numeric_value
         return 0.0
+
+
+fact_ledger_service = FactLedgerService()
+

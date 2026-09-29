@@ -201,6 +201,24 @@ Replaces the coarse 5-state machine with resilient, verifiable steps:
   $$\text{Fingerprint} = \text{SHA256}(\text{Platform} + \text{CompanyNorm} + \text{TitleNorm} + \text{LocationNorm} + \text{JDSummaryHash})$$
 - Completely immune to URL query parameter mutations or syndication cross-posts.
 
+### 4.2 v3.0 Strategic Innovations
+
+#### F. Inbound Email & Interview Intelligence Sync
+- Connects securely via local IMAP SSL (`EmailSyncService`).
+- Parses recruiter replies, extracts interview dates/links, and auto-transitions application lifecycle records in `InterviewPipelineService`.
+
+#### G. AI Mock Interview Preparation Coach
+- Grounded directly in verified candidate facts from `CandidateFact` ledger.
+- Generates company & role intelligence dossiers, 10 technical deep-dive questions, and STAR behavioral stories.
+- Provides interactive 1-10 clarity scoring and feedback via `InterviewCoachModal.jsx`.
+
+#### H. Corporate ATS Automation (Workday)
+- `WorkdayAdapter` automates multi-step wizard traversal on enterprise `myworkdayjobs.com` portals.
+- Supports resume autofill, Workday-specific `data-automation-id` field mapping, and receipt confirmation verification.
+
+#### I. Vision-Assisted Coordinate Fallback Solver
+- For stubborn Shadow DOM trees or custom canvas widgets, calculates viewport bounding boxes and executes stealth Bézier mouse movement clicks.
+
 ---
 
 ## 5. Security and Trust Boundaries

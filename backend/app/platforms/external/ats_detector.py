@@ -8,6 +8,7 @@ from typing import Optional, List
 from app.platforms.adapter_interface import ApplicationAdapter
 from app.platforms.external.greenhouse import greenhouse_adapter, GreenhouseAdapter
 from app.platforms.external.lever import lever_adapter, LeverAdapter
+from app.platforms.external.workday import workday_adapter, WorkdayAdapter
 
 
 class ATSDetector:
@@ -17,6 +18,7 @@ class ATSDetector:
         self._adapters: List[ApplicationAdapter] = [
             greenhouse_adapter,
             lever_adapter,
+            workday_adapter,
         ]
 
     def register_adapter(self, adapter: ApplicationAdapter):

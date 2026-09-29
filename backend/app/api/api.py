@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import resume, bot, jobs, settings, screening, outreach, notifications, security, mobile_companion, analytics, review, interview
+from app.api.endpoints import resume, bot, jobs, settings, screening, outreach, notifications, security, mobile_companion, analytics, review, interview, email_sync, interview_coach
 
 api_router = APIRouter()
 api_router.include_router(resume.router, prefix="/resume", tags=["Resume"])
@@ -14,6 +14,10 @@ api_router.include_router(mobile_companion.router, prefix="/mobile", tags=["Mobi
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics & Funnel"])
 api_router.include_router(review.router, prefix="/review", tags=["Review Queue & Policy"])
 api_router.include_router(interview.router, prefix="/interview", tags=["Interview Pipeline"])
+api_router.include_router(email_sync.router, prefix="/email", tags=["Email Sync & Monitoring"])
+api_router.include_router(interview_coach.router, prefix="/interview-coach", tags=["AI Mock Interview Coach"])
+
+
 
 
 

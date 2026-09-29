@@ -31,6 +31,8 @@ class InterviewRound(BaseModel):
 
 class ApplicationLifecycleRecord(BaseModel):
     application_id: str
+    company: Optional[str] = None
+    job_title: Optional[str] = None
     current_status: PostApplyStatus = PostApplyStatus.APPLIED
     interviews: List[InterviewRound] = Field(default_factory=list)
     offer_salary: Optional[str] = None
@@ -42,9 +44,22 @@ class InterviewPipelineService:
     def __init__(self):
         self._records: Dict[str, ApplicationLifecycleRecord] = {}
 
-    def get_or_create(self, application_id: str) -> ApplicationLifecycleRecord:
+    @property
+    def records(self) -> Dict[str, ApplicationLifecycleRecord]:
+        return self._records
+
+    def get_or_create(self, application_id: str, company: Optional[str] = None, job_title: Optional[str] = None) -> ApplicationLifecycleRecord:
         if application_id not in self._records:
-            self._records[application_id] = ApplicationLifecycleRecord(application_id=application_id)
+            self._records[application_id] = ApplicationLifecycleRecord(
+                application_id=application_id,
+                company=company,
+                job_title=job_title
+            )
+        else:
+            if company:
+                self._records[application_id].company = company
+            if job_title:
+                self._records[application_id].job_title = job_title
         return self._records[application_id]
 
     def update_status(self, application_id: str, new_status: PostApplyStatus, notes: Optional[str] = None) -> ApplicationLifecycleRecord:
@@ -95,3 +110,4 @@ class InterviewPipelineService:
 
 
 interview_service = InterviewPipelineService()
+interview_pipeline_service = interview_service

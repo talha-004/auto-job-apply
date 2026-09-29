@@ -177,3 +177,60 @@ Every phase adheres to strict dependency ordering, comprehensive testing require
   - `PHASE-09-TASK-03`: Complete all checklist items in `PRODUCTION_CERTIFICATION.md`.
   - `PHASE-09-TASK-04`: Synchronize `IMPLEMENTATION_PROGRESS.md`, `IMPLEMENTATION_AUDIT.md`, and `ARCHITECTURE.md`.
 - **Acceptance Criteria**: Test suite passes with >210 passing tests, frontend builds cleanly, production certification criteria satisfied.
+
+---
+
+## Phase 10: Inbound Email & Interview Intelligence (v3.0 Pillar 1)
+- **Objective**: Automate recruiter email scanning, intent classification, and lifecycle status transition.
+- **Problems Solved**: Addresses manual tracking friction; captures interview dates and coding challenge deadlines automatically.
+- **Tasks**:
+  - `PHASE-10-TASK-01`: Build `EmailSyncService` supporting IMAP SSL polling, date/time parsing, and application matching.
+  - `PHASE-10-TASK-02`: Create REST endpoints `/api/email/sync`, `/api/email/classified`, and `/api/email/simulate`.
+  - `PHASE-10-TASK-03`: Write unit and integration tests verifying interview scheduling and rejection status updates.
+- **Acceptance Criteria**: Ingesting recruiter emails transitions matching applications to `INTERVIEW_SCHEDULED` or `REJECTED`.
+
+---
+
+## Phase 11: AI Mock Interview Preparation Coach (v3.0 Pillar 2)
+- **Objective**: Generate role-specific interview dossiers, technical questions, and STAR behavioral frameworks grounded in candidate facts.
+- **Problems Solved**: Closes the career lifecycle loop from job application to interview preparation.
+- **Tasks**:
+  - `PHASE-11-TASK-01`: Implement `InterviewCoachService` with generative synthesis and deterministic fallback.
+  - `PHASE-11-TASK-02`: Create REST endpoints `/api/interview-coach/generate` and `/api/interview-coach/practice/evaluate`.
+  - `PHASE-11-TASK-03`: Build interactive frontend component `InterviewCoachModal.jsx`.
+  - `PHASE-11-TASK-04`: Write test suite verifying dossier generation and practice scoring.
+- **Acceptance Criteria**: Generates 3+ technical questions and STAR stories; evaluates user practice answers with 1-10 scoring.
+
+---
+
+## Phase 12: Corporate ATS Automation — Workday & External Portals (v3.0 Pillar 3)
+- **Objective**: Provide automated application traversal on enterprise Workday (`*.myworkdayjobs.com`) portals.
+- **Problems Solved**: Expands reach beyond job boards to external corporate career sites.
+- **Tasks**:
+  - `PHASE-12-TASK-01`: Implement `WorkdayAdapter` implementing `ApplicationAdapter` with Workday `data-automation-id` selectors.
+  - `PHASE-12-TASK-02`: Register `workday_adapter` in `ATSDetector`.
+  - `PHASE-12-TASK-03`: Write unit test suite verifying URL detection, form extraction, resume upload, and confirmation.
+- **Acceptance Criteria**: Correctly detects Workday URLs, traverses multi-step wizard, and extracts receipt confirmation.
+
+---
+
+## Phase 13: Vision-Assisted Coordinate Fallback Solver (v3.0 Pillar 4)
+- **Objective**: Resolve stubborn Shadow DOM elements, canvas controls, and obscured buttons using coordinate-based Bézier clicking.
+- **Problems Solved**: Eliminates automation halt on non-standard interactive widgets.
+- **Tasks**:
+  - `PHASE-13-TASK-01`: Implement `VisionCoordinateSolver` with viewport bounding box calculation.
+  - `PHASE-13-TASK-02`: Connect to `StealthDriver` for human-like Bézier mouse trajectory and natural click hold duration.
+  - `PHASE-13-TASK-03`: Write test suite verifying fallback to coordinate click when standard click is blocked.
+- **Acceptance Criteria**: Obscured or Shadow DOM buttons receive stealth coordinate clicks without raising unhandled exceptions.
+
+---
+
+## Phase 14: Comprehensive v3.0 Integration & Production Certification
+- **Objective**: Validate the full v3.0 platform through end-to-end regression and certification.
+- **Problems Solved**: Ensures zero regressions across all 14 phases.
+- **Tasks**:
+  - `PHASE-14-TASK-01`: Run full backend test suite (`python -m pytest backend/tests`). Target: $\ge 235$ passing tests.
+  - `PHASE-14-TASK-02`: Run frontend production build (`npm run build`). Target: 0 errors.
+  - `PHASE-14-TASK-03`: Complete sign-off in `PRODUCTION_CERTIFICATION.md`.
+- **Acceptance Criteria**: 239 passed backend tests, 0 build errors, and synchronized documentation.
+

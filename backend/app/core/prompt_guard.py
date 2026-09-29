@@ -17,7 +17,7 @@ class PromptGuard:
     ADVERSARIAL_PATTERNS = [
         r"(?i)\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions\b",
         r"(?i)\byou\s+are\s+now\s+(?:a|an|in)\b",
-        r"(?i)\b(system\s*:|assistant\s*:|user\s*:|human\s*:)\b",
+        r"(?i)\b(system|assistant|user|human)\s*:",
         r"(?i)\bdisregard\s+(?:the\s+)?(?:system\s+)?prompt\b",
         r"(?i)\banswer\s+(?:only\s+)?['\"]?yes['\"]?\s+to\s+everything\b",
         r"(?i)\boutput\s+the\s+system\s+instructions\b",
@@ -50,6 +50,11 @@ class PromptGuard:
             clean = clean[:max_len] + " ... [truncated]"
 
         return clean.strip()
+
+    @classmethod
+    def sanitize(cls, text: Optional[str], max_len: int = 4000) -> str:
+        """Alias for sanitize_untrusted_text."""
+        return cls.sanitize_untrusted_text(text, max_len=max_len)
 
     @classmethod
     def wrap_untrusted_context(cls, tag_name: str, content: str) -> str:
