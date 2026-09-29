@@ -9,15 +9,39 @@ from app.models.job import LogMessage, LogLevel
 
 from logging.handlers import RotatingFileHandler
 from app.core.config import settings
+from app.core.security import SecurityManager
+
+class SensitiveDataFilter(logging.Filter):
+    """Filter that strips credentials, API keys, tokens, and cookies from log records."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = SecurityManager.sanitize_text(record.msg)
+        if record.args:
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    SecurityManager.sanitize_text(arg) if isinstance(arg, str) else arg
+                    for arg in record.args
+                )
+            elif isinstance(record.args, dict):
+                record.args = {
+                    k: (SecurityManager.sanitize_text(v) if isinstance(v, str) else v)
+                    for k, v in record.args.items()
+                }
+            elif isinstance(record.args, str):
+                record.args = SecurityManager.sanitize_text(record.args)
+        return True
 
 # Setup standard python logger with console and rotating file handler
 logger = logging.getLogger("AutoApplyJobs")
 logger.setLevel(logging.INFO)
+sensitive_filter = SensitiveDataFilter()
+logger.addFilter(sensitive_filter)
 
 # Console Handler
 c_handler = logging.StreamHandler()
 c_format = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 c_handler.setFormatter(c_format)
+c_handler.addFilter(sensitive_filter)
 logger.addHandler(c_handler)
 
 # File Handler (5 MB max size, 5 backup files)
@@ -30,6 +54,7 @@ try:
     )
     f_format = logging.Formatter("%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] - %(message)s")
     f_handler.setFormatter(f_format)
+    f_handler.addFilter(sensitive_filter)
     logger.addHandler(f_handler)
 except Exception as e:
     print(f"Warning: Could not initialize file logger: {e}")
@@ -87,18 +112,27 @@ class EventBroadcaster:
         platform: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None
     ):
+        # Automatically redact secrets from emitted logs and details
+        sanitized_msg = SecurityManager.sanitize_text(message)
+        sanitized_details = None
+        if details:
+            sanitized_details = {
+                k: (SecurityManager.sanitize_text(str(v)) if isinstance(v, (str, int, float)) else v)
+                for k, v in details.items()
+            }
+
         log_entry = LogMessage(
             timestamp=datetime.now().strftime("%H:%M:%S"),
             level=level,
             platform=platform,
-            message=message,
-            details=details
+            message=sanitized_msg,
+            details=sanitized_details
         )
         self.log_history.append(log_entry)
 
         # Also write to standard logger
         log_prefix = f"[{platform}] " if platform else ""
-        formatted_msg = f"{log_prefix}{message}"
+        formatted_msg = f"{log_prefix}{sanitized_msg}"
         if level == LogLevel.ERROR:
             logger.error(formatted_msg)
         elif level == LogLevel.WARNING:
@@ -131,3 +165,4 @@ class EventBroadcaster:
         return list(self.log_history)[-limit:]
 
 broadcaster = EventBroadcaster()
+

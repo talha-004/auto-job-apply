@@ -39,13 +39,9 @@ wheels/
 *.xlsx
 *.csv
 *.db
-backend/data/*.json
-backend/data/*.pdf
-backend/data/*.docx
-backend/data/*.xlsx
-backend/data/*.db
-backend/data/cookies/
-backend/data/logs/
+backend/data/**
+!backend/data/
+!backend/data/.gitkeep
 
 # Node / React
 node_modules/

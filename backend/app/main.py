@@ -20,6 +20,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting AutoApplyJobs backend server... (Event Loop: {type(loop).__name__})")
     logger.info(f"Ollama Target: {settings.OLLAMA_BASE_URL} (Model: {settings.OLLAMA_MODEL})")
     logger.info(f"Excel Tracker File: {settings.EXCEL_FILE_PATH}")
+
+    # Initialize relational persistence in PostgreSQL
+    try:
+        from app.services.persistence_service import persistence_service
+        persistence_service.initialize()
+    except Exception as e:
+        logger.error(f"[Main] Database persistence initialization failed: {e}")
+
     yield
     logger.info("Shutting down AutoApplyJobs backend server...")
 

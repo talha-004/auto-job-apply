@@ -22,6 +22,7 @@ from app.platforms.linkedin import LinkedInPlatform
 from app.platforms.naukri import NaukriPlatform
 from app.platforms.indeed import IndeedPlatform
 from app.platforms.dindin import DindinPlatform
+from app.services.orchestrator import orchestrator
 
 class BotManager:
     def __init__(self):
@@ -42,54 +43,59 @@ class BotManager:
         self._pause_event: Optional[asyncio.Event] = None
         self._stop_event: Optional[asyncio.Event] = None
         self._current_bot_instance = None
+        self._state_lock = threading.Lock()
 
     def get_status(self) -> BotStatusResponse:
-        return BotStatusResponse(
-            state=self.state,
-            current_platform=self.current_platform,
-            current_job=self.current_job,
-            applied_count=self.applied_count,
-            success_count=self.success_count,
-            failed_count=self.failed_count,
-            skipped_count=self.skipped_count,
-            total_target=self.total_target,
-            is_paused_for_captcha=self.is_paused_for_captcha,
-            captcha_message=self.captcha_message,
-            start_time=self.start_time
-        )
+        with self._state_lock:
+            return BotStatusResponse(
+                state=self.state,
+                current_platform=self.current_platform,
+                current_job=self.current_job,
+                applied_count=self.applied_count,
+                success_count=self.success_count,
+                failed_count=self.failed_count,
+                skipped_count=self.skipped_count,
+                total_target=self.total_target,
+                is_paused_for_captcha=self.is_paused_for_captcha,
+                captcha_message=self.captcha_message,
+                start_time=self.start_time
+            )
 
     async def start(self, config: SearchConfig) -> Dict[str, Any]:
         """Start the automated job application background task."""
-        if self.state == BotState.RUNNING:
-            return {"success": False, "message": "Bot is already running."}
+        with self._state_lock:
+            if self.state == BotState.RUNNING:
+                return {"success": False, "message": "Bot is already running."}
+            if self._worker_thread and self._worker_thread.is_alive():
+                return {"success": False, "message": "Previous bot run is still stopping. Please wait a moment."}
 
-        profile = resume_parser_service.load_profile()
-        if not profile:
-            return {
-                "success": False,
-                "message": "No candidate resume profile found. Please upload a resume before starting the bot."
-            }
+            profile = resume_parser_service.load_profile()
+            if not profile:
+                return {
+                    "success": False,
+                    "message": "No candidate resume profile found. Please upload a resume before starting the bot."
+                }
 
-        # Reset state counters
-        self.state = BotState.RUNNING
-        self.current_platform = None
-        self.current_job = None
-        self.applied_count = 0
-        self.success_count = 0
-        self.failed_count = 0
-        self.skipped_count = 0
-        self.total_target = config.max_applications
-        self.start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.is_paused_for_captcha = False
-        self.captcha_message = None
+            # Reset state counters
+            self.state = BotState.RUNNING
+            self.current_platform = None
+            self.current_job = None
+            self.applied_count = 0
+            self.success_count = 0
+            self.failed_count = 0
+            self.skipped_count = 0
+            self.total_target = config.max_applications
+            self.start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.is_paused_for_captcha = False
+            self.captcha_message = None
 
-        # Launch background worker thread with WindowsProactorEventLoopPolicy
-        self._worker_thread = threading.Thread(
-            target=self._worker_thread_entry,
-            args=(config, profile),
-            daemon=True
-        )
-        self._worker_thread.start()
+            # Launch background worker thread with WindowsProactorEventLoopPolicy
+            self._worker_thread = threading.Thread(
+                target=self._worker_thread_entry,
+                args=(config, profile),
+                daemon=True
+            )
+            self._worker_thread.start()
         
         await broadcaster.emit_log(
             f"🚀 Bot started! Target: {config.max_applications} applications across {len(config.platforms)} platforms.",
@@ -114,6 +120,10 @@ class BotManager:
         except Exception as e:
             logger.error(f"Worker thread error: {e}")
         finally:
+            with self._state_lock:
+                self.state = BotState.IDLE
+                self.current_platform = None
+                self.current_job = None
             try:
                 loop.close()
             except Exception:
@@ -122,16 +132,17 @@ class BotManager:
 
     async def pause(self, reason: Optional[str] = None) -> Dict[str, Any]:
         """Pause running bot."""
-        if self.state != BotState.RUNNING:
-            return {"success": False, "message": "Bot is not running."}
+        with self._state_lock:
+            if self.state != BotState.RUNNING:
+                return {"success": False, "message": "Bot is not running."}
 
-        self.state = BotState.PAUSED
-        if self._worker_loop and self._worker_loop.is_running() and self._pause_event:
-            self._worker_loop.call_soon_threadsafe(self._pause_event.clear)
+            self.state = BotState.PAUSED
+            if self._worker_loop and self._worker_loop.is_running() and self._pause_event:
+                self._worker_loop.call_soon_threadsafe(self._pause_event.clear)
 
-        if reason:
-            self.is_paused_for_captcha = True
-            self.captcha_message = reason
+            if reason:
+                self.is_paused_for_captcha = True
+                self.captcha_message = reason
 
         await broadcaster.emit_log(
             f"⏸️ Bot has been paused. {reason or ''}",
@@ -142,29 +153,34 @@ class BotManager:
 
     async def resume(self) -> Dict[str, Any]:
         """Resume paused bot."""
-        if self.state != BotState.PAUSED:
-            return {"success": False, "message": "Bot is not paused."}
+        with self._state_lock:
+            if self.state != BotState.PAUSED:
+                return {"success": False, "message": "Bot is not paused."}
 
-        self.state = BotState.RUNNING
-        self.is_paused_for_captcha = False
-        self.captcha_message = None
-        if self._worker_loop and self._worker_loop.is_running() and self._pause_event:
-            self._worker_loop.call_soon_threadsafe(self._pause_event.set)
+            self.state = BotState.RUNNING
+            self.is_paused_for_captcha = False
+            self.captcha_message = None
+            if self._worker_loop and self._worker_loop.is_running() and self._pause_event:
+                self._worker_loop.call_soon_threadsafe(self._pause_event.set)
 
         await broadcaster.emit_log("▶️ Bot execution resumed by user.", level=LogLevel.INFO, platform=self.current_platform)
         return {"success": True, "message": "Bot resumed."}
 
     async def stop(self) -> Dict[str, Any]:
         """Stop and cancel running bot execution."""
-        if self.state == BotState.IDLE or self.state == BotState.STOPPED:
-            return {"success": False, "message": "Bot is already idle or stopped."}
+        with self._state_lock:
+            if self.state == BotState.IDLE or self.state == BotState.STOPPED:
+                return {"success": False, "message": "Bot is already idle or stopped."}
 
-        self.state = BotState.STOPPED
-        if self._worker_loop and self._worker_loop.is_running():
-            if self._stop_event:
-                self._worker_loop.call_soon_threadsafe(self._stop_event.set)
-            if self._pause_event:
-                self._worker_loop.call_soon_threadsafe(self._pause_event.set)
+            self.state = BotState.STOPPED
+            if self._worker_loop and self._worker_loop.is_running():
+                if self._stop_event:
+                    self._worker_loop.call_soon_threadsafe(self._stop_event.set)
+                if self._pause_event:
+                    self._worker_loop.call_soon_threadsafe(self._pause_event.set)
+
+        await broadcaster.emit_log("🛑 Bot execution stopped by user.", level=LogLevel.INFO, platform=self.current_platform)
+        return {"success": True, "message": "Bot stopped."}
 
     async def update_naukri_headline(self, headline: str) -> Dict[str, Any]:
         """Update candidate resume headline on Naukri reusing stored cookies."""
@@ -179,13 +195,10 @@ class BotManager:
             await bot_instance.init_browser()
             logged_in = await bot_instance.login()
             if not logged_in:
-                return {"success": False, "message": "Failed to authenticate on Naukri. Please ensure valid credentials or cookies."}
-
+                return {"success": False, "message": "Could not authenticate to Naukri to update headline."}
+            
             success = await bot_instance.update_profile_headline(headline)
-            if success:
-                return {"success": True, "message": f"Successfully updated Naukri headline to '{headline}'."}
-            else:
-                return {"success": False, "message": "Could not update headline on profile page."}
+            return {"success": success, "message": "Headline update succeeded." if success else "Headline update failed."}
         except Exception as e:
             logger.error(f"Error in update_naukri_headline: {e}")
             return {"success": False, "message": str(e)}
@@ -193,19 +206,27 @@ class BotManager:
             await bot_instance.close_browser()
 
     async def run_preflight_check(self, config: Optional[SearchConfig] = None) -> Dict[str, Any]:
-        """Perform comprehensive pre-flight validation before starting application bot."""
+        """Execute automated preflight verification on all critical bot prerequisites."""
         checks = {}
         has_errors = False
         has_warnings = False
 
-        # 1. Candidate Resume Profile
+        # 1. Candidate Profile & Resume File
         profile = resume_parser_service.load_profile()
-        if not profile:
+        resume_exists = settings.RESUME_FILE_PATH.exists()
+
+        if not profile and not resume_exists:
             checks["profile"] = {
                 "status": "error",
-                "message": "Candidate resume profile not found. Upload a resume first."
+                "message": "Candidate profile and resume PDF not found. Please upload a resume first."
             }
             has_errors = True
+        elif not profile and resume_exists:
+            checks["profile"] = {
+                "status": "warning",
+                "message": "Resume PDF found, but candidate_profile.json not parsed. Profile will parse on launch."
+            }
+            has_warnings = True
         else:
             skill_count = len(profile.skills) if profile.skills else 0
             if skill_count < 3:
@@ -240,10 +261,12 @@ class BotManager:
             has_errors = True
 
         # 3. LLM Configuration
-        if settings.GEMINI_API_KEY:
+        gemini_key = getattr(settings, "GEMINI_API_KEY", None)
+        gemini_model = getattr(settings, "GEMINI_MODEL", "gemini-pro")
+        if gemini_key:
             checks["llm"] = {
                 "status": "ok",
-                "message": f"Gemini LLM configured with model '{settings.GEMINI_MODEL}'."
+                "message": f"Gemini LLM configured with model '{gemini_model}'."
             }
         elif settings.OLLAMA_BASE_URL:
             checks["llm"] = {
@@ -259,11 +282,12 @@ class BotManager:
 
         # 4. Platforms & Authentication
         platforms_to_check = config.platforms if (config and config.platforms) else [PlatformEnum.NAUKRI, PlatformEnum.LINKEDIN]
+        cookie_dir = getattr(settings, "COOKIE_DIR", None) or getattr(settings, "COOKIES_DIR", settings.DATA_PATH / "cookies")
         platform_checks = {}
         for p in platforms_to_check:
             if p == PlatformEnum.NAUKRI:
-                has_creds = bool(settings.NAUKRI_USERNAME and settings.NAUKRI_PASSWORD)
-                cookie_exists = (settings.COOKIE_DIR / "naukri_cookies.json").exists()
+                has_creds = bool((getattr(settings, "NAUKRI_USERNAME", None) or getattr(settings, "NAUKRI_EMAIL", None)) and settings.NAUKRI_PASSWORD)
+                cookie_exists = (cookie_dir / "naukri_cookies.json").exists()
                 if has_creds or cookie_exists:
                     platform_checks["naukri"] = {
                         "status": "ok",
@@ -276,8 +300,8 @@ class BotManager:
                     }
                     has_warnings = True
             elif p == PlatformEnum.LINKEDIN:
-                has_creds = bool(settings.LINKEDIN_USERNAME and settings.LINKEDIN_PASSWORD)
-                cookie_exists = (settings.COOKIE_DIR / "linkedin_cookies.json").exists()
+                has_creds = bool((getattr(settings, "LINKEDIN_USERNAME", None) or getattr(settings, "LINKEDIN_EMAIL", None)) and settings.LINKEDIN_PASSWORD)
+                cookie_exists = (cookie_dir / "linkedin_cookies.json").exists()
                 if has_creds or cookie_exists:
                     platform_checks["linkedin"] = {
                         "status": "ok",
@@ -422,61 +446,23 @@ class BotManager:
             await bot_instance.close_browser()
 
     async def _run_orchestrator(self, config: SearchConfig, profile: ResumeProfile):
-        """Sequential platform runner managing Playwright lifecycle."""
-        platform_classes = {
-            PlatformEnum.LINKEDIN: LinkedInPlatform,
-            PlatformEnum.NAUKRI: NaukriPlatform,
-            PlatformEnum.INDEED: IndeedPlatform,
-            PlatformEnum.DINDIN: DindinPlatform,
-        }
+        """Delegate sequential execution and lifecycle transitions to ApplicationOrchestrator."""
+        def progress_callback(stats: Dict[str, Any]):
+            with self._state_lock:
+                self.applied_count = stats.get("applied", self.applied_count)
+                self.success_count = stats.get("success", self.success_count)
+                self.failed_count = stats.get("failed", self.failed_count)
+                self.skipped_count = stats.get("skipped", self.skipped_count)
+                self.current_platform = stats.get("current_platform", self.current_platform)
+                self.current_job = stats.get("current_job", self.current_job)
 
         try:
-            for platform_enum in config.platforms:
-                if self._stop_event.is_set() or self.state == BotState.STOPPED:
-                    break
-
-                self.current_platform = platform_enum.value
-                bot_cls = platform_classes.get(platform_enum)
-                if not bot_cls:
-                    continue
-
-                await broadcaster.emit_log(f"Starting automation on platform: {platform_enum.value}", level=LogLevel.INFO, platform=platform_enum.value)
-
-                bot_instance = bot_cls(
-                    config=config,
-                    profile=profile,
-                    pause_event=self._pause_event,
-                    stop_event=self._stop_event
-                )
-                self._current_bot_instance = bot_instance
-
-                try:
-                    await bot_instance.init_browser()
-                    logged_in = await bot_instance.login()
-
-                    if logged_in or platform_enum in [PlatformEnum.DINDIN, PlatformEnum.INDEED]:
-                        applied_on_platform = await bot_instance.search_and_apply()
-                        self.applied_count += applied_on_platform
-                        self.success_count += applied_on_platform
-                    else:
-                        await broadcaster.emit_log(f"Skipping {platform_enum.value} search due to unverified authentication.", level=LogLevel.WARNING, platform=platform_enum.value)
-
-                except asyncio.CancelledError:
-                    await broadcaster.emit_log(f"Cancelled execution on {platform_enum.value}.", level=LogLevel.WARNING, platform=platform_enum.value)
-                    break
-                except Exception as e:
-                    import traceback
-                    tb_str = traceback.format_exc()
-                    logger.error(f"Error executing platform {platform_enum.value}: {repr(e)}\n{tb_str}")
-                    err_detail = str(e) if str(e).strip() else repr(e)
-                    await broadcaster.emit_log(f"Platform error on {platform_enum.value}: {err_detail}", level=LogLevel.ERROR, platform=platform_enum.value)
-                finally:
-                    await bot_instance.close_browser()
-                    self._current_bot_instance = None
-
-            await broadcaster.emit_log(
-                f"🎉 Application run completed! Total applied: {self.applied_count}/{self.total_target}",
-                level=LogLevel.SUCCESS
+            await orchestrator.run_pipeline(
+                config=config,
+                profile=profile,
+                pause_event=self._pause_event,
+                stop_event=self._stop_event,
+                progress_callback=progress_callback
             )
         except asyncio.CancelledError:
             await broadcaster.emit_log("Bot run cancelled.", level=LogLevel.INFO)
@@ -484,8 +470,9 @@ class BotManager:
             logger.error(f"Unhandled error in bot orchestrator: {e}")
             await broadcaster.emit_log(f"Critical error: {str(e)}", level=LogLevel.ERROR)
         finally:
-            self.state = BotState.IDLE
-            self.current_platform = None
-            self.current_job = None
+            with self._state_lock:
+                self.state = BotState.IDLE
+                self.current_platform = None
+                self.current_job = None
 
 bot_manager = BotManager()

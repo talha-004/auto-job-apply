@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useBot } from '../context/BotContext';
-import { jobsAPI } from '../services/api';
+import { jobsAPI, tailoredResumeAPI } from '../services/api';
 import { 
   FileSpreadsheet, 
   Download, 
@@ -15,7 +15,8 @@ import {
   Mail,
   Copy,
   User,
-  Zap
+  Zap,
+  FileText
 } from 'lucide-react';
 
 export const JobApplicationsTable = () => {
@@ -460,16 +461,29 @@ export const JobApplicationsTable = () => {
                           </div>
                         </div>
                       ) : (
-                        job.job_url ? (
-                          <a 
-                            href={job.job_url} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}
-                          >
-                            View <ExternalLink size={13} />
-                          </a>
-                        ) : '—'
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {job.job_url ? (
+                            <a 
+                              href={job.job_url} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}
+                            >
+                              View <ExternalLink size={13} />
+                            </a>
+                          ) : '—'}
+                          {job.job_id && (
+                            <a
+                              href={tailoredResumeAPI.getDownloadUrl(job.job_id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none', fontSize: '0.72rem' }}
+                              title="Download ATS-Tailored Resume PDF for this job"
+                            >
+                              <FileText size={12} /> Resume
+                            </a>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>

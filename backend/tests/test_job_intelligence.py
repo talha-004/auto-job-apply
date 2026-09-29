@@ -251,3 +251,29 @@ async def test_safe_click_handles_exceptions_gracefully():
 
     result = await platform.safe_click(faulty_el, timeout=1000)
     assert result is False
+
+
+# =====================================================================
+# 6. Extended Skill Matching & Normalization
+# =====================================================================
+def test_extended_skill_matching_and_normalization():
+    """Verify that modern web stack skills and aliases match the candidate profile accurately."""
+    profile = ResumeProfile(
+        full_name="Syed Talha Ahmed",
+        skills=["React.js", "Next.js", "Express.js", "Tailwind CSS", "REST APIs", "Redux Toolkit", "PostgreSQL", "HTML5", "CSS3"],
+        years_of_experience=1.5,
+        work_experience=[WorkExperience(company="Invertio", title="Software Developer Associate", start_date="2026", end_date="Present")]
+    )
+
+    jd_text = """
+    We are looking for a Full Stack Developer proficient in React, Nextjs, Express, Tailwind, REST, Redux, and PostgreSQL.
+    HTML and CSS fundamentals required.
+    Experience: 1-3 years.
+    """
+    res = match_scorer.score_job("Full Stack Developer", jd_text, profile, min_threshold=60)
+    assert res.score >= 70, f"Expected high match score, got {res.score}%"
+    assert res.is_eligible is True
+    # Verify core skills matched despite casing and alias differences
+    assert any("react" in s.lower() for s in res.matched_skills)
+    assert any("express" in s.lower() for s in res.matched_skills)
+

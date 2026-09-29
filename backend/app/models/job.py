@@ -30,9 +30,12 @@ class ReasonCode(str, Enum):
 
 class JobLifecycleStatus(str, Enum):
     DISCOVERED = "DISCOVERED"
+    EVALUATING = "EVALUATING"
     ANALYZED = "ANALYZED"
     ELIGIBLE = "ELIGIBLE"
+    PREPARING = "PREPARING"
     APPLYING = "APPLYING"
+    SUBMITTED = "SUBMITTED"
     SUCCESS = "SUCCESS"
     SKIPPED = "SKIPPED"
     MANUAL_REVIEW = "MANUAL_REVIEW"
@@ -74,6 +77,30 @@ class Education(BaseModel):
     graduation_year: str = ""
     grade_or_gpa: Optional[str] = ""
 
+class QAVault(BaseModel):
+    """
+    Standardized ATS Knowledge Base & Candidate Memory.
+    Provides verified answers for application screening questions without hallucination.
+    """
+    experience_years: float = 2.0
+    relevant_experience_years: float = 2.0
+    notice_period_days: int = 15
+    notice_period: str = "Immediate"
+    current_ctc_lpa: Optional[float] = 2.4
+    expected_ctc_lpa: Optional[float] = 3.5
+    currency: str = "INR"
+    work_authorization: str = "Yes"
+    require_sponsorship: str = "No"
+    willing_to_relocate: str = "Yes"
+    remote_preference: str = "Yes"
+    gender: str = "Decline to specify"
+    veteran_status: str = "No"
+    disability_status: str = "No"
+    availability: str = "Immediate"
+    driving_license: str = "Yes"
+    highest_education: str = "Master of Business Administration – Information Technology"
+    custom_qa: Dict[str, str] = Field(default_factory=dict)
+
 class ResumeProfile(BaseModel):
     full_name: str = ""
     email: str = ""
@@ -89,6 +116,7 @@ class ResumeProfile(BaseModel):
     education: List[Education] = Field(default_factory=list)
     certifications: List[str] = Field(default_factory=list)
     languages: List[str] = Field(default_factory=list)
+    qa_vault: QAVault = Field(default_factory=QAVault)
     custom_answers: Dict[str, Any] = Field(
         default_factory=lambda: {
             "notice_period_days": None,
@@ -117,6 +145,10 @@ class SearchConfig(BaseModel):
     freshness_days: Optional[int] = 3
     min_match_score: int = 60
     match_gating_mode: str = "observe"
+    excluded_keywords: List[str] = Field(default_factory=list)
+    excluded_companies: List[str] = Field(default_factory=list)
+    max_experience_gap: Optional[float] = 3.0
+    require_remote: bool = False
 
     @field_validator("freshness_days")
     @classmethod
@@ -138,6 +170,61 @@ class SearchConfig(BaseModel):
         if v not in ("observe", "enforce"):
             raise ValueError("match_gating_mode must be 'observe' or 'enforce'")
         return v
+
+class DiscoveredJob(BaseModel):
+    """Normalized multi-board job record from fast HTTP discovery or browser scraping."""
+    job_id: str
+    platform: str
+    title: str
+    company: str
+    location: str
+    is_remote: bool = False
+    job_url: str
+    description: str = ""
+    posted_date: Optional[str] = None
+    salary_min: Optional[float] = None
+    salary_max: Optional[float] = None
+    currency: Optional[str] = "INR"
+    job_type: Optional[str] = None
+    discovered_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    raw_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class DiscoveryConfig(BaseModel):
+    """Configuration parameters for fast multi-board job scraping."""
+    keywords: str = "Full Stack Developer"
+    location: str = "India"
+    platforms: List[str] = Field(default_factory=lambda: ["linkedin", "indeed", "glassdoor", "zip_recruiter"])
+    results_wanted: int = 25
+    hours_old: int = 72
+    country_indeed: str = "india"
+    is_remote: Optional[bool] = None
+
+class JobEvaluationResult(BaseModel):
+    """Consolidated job evaluation outcome produced by JobEvaluator."""
+    job_id: str
+    title: str
+    company: str
+    location: str = ""
+    is_eligible: bool = True
+    disqualification_reasons: List[str] = Field(default_factory=list)
+    match_score: int = Field(default=0, ge=0, le=100)
+    matched_skills: List[str] = Field(default_factory=list)
+    missing_skills: List[str] = Field(default_factory=list)
+    matched_preferred: List[str] = Field(default_factory=list)
+    match_reasons: List[str] = Field(default_factory=list)
+    quality_score: int = Field(default=0, ge=0, le=100)
+    quality_reasons: List[str] = Field(default_factory=list)
+    priority_score: int = Field(default=0, ge=0, le=100)
+    priority_reasons: List[str] = Field(default_factory=list)
+    risk_flags: List[str] = Field(default_factory=list)
+    risk_evidence: Dict[str, str] = Field(default_factory=dict)
+    contacts: List[Dict[str, Any]] = Field(default_factory=list)
+    hr_email: Optional[str] = None
+    recruiter_name: Optional[str] = None
+    suggested_action: str = "APPLY"  # APPLY, SKIP, MANUAL_REVIEW
+    evaluation_summary: str = ""
+    evaluated_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
 
 class JobApplicationRecord(BaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -196,3 +283,50 @@ class BotStatusResponse(BaseModel):
     is_paused_for_captcha: bool = False
     captcha_message: Optional[str] = None
     start_time: Optional[str] = None
+
+
+class OutreachChannel(str, Enum):
+    EMAIL = "EMAIL"
+    WHATSAPP = "WHATSAPP"
+    LINKEDIN_MESSAGE = "LINKEDIN_MESSAGE"
+
+
+class OutreachStatus(str, Enum):
+    DRAFTED = "DRAFTED"
+    READY_TO_SEND = "READY_TO_SEND"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    DECLINED = "DECLINED"
+
+
+class RecruiterContact(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    contact_type: str = "unknown"  # hr, recruiter, careers, jobs, personal, hiring_manager
+    source: str = "job_description"  # job_description, recruiter_widget, page_meta
+    confidence: str = "medium"  # high, medium, low
+    company: Optional[str] = None
+    designation: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
+class OutreachMessage(BaseModel):
+    id: str = Field(default_factory=lambda: f"outreach_{int(datetime.now().timestamp() * 1000)}")
+    job_id: str
+    job_title: str
+    company: str
+    recipient: RecruiterContact
+    channel: OutreachChannel = OutreachChannel.EMAIL
+    subject: Optional[str] = None
+    body_text: str
+    body_html: Optional[str] = None
+    attachment_path: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    status: OutreachStatus = OutreachStatus.DRAFTED
+    requires_approval: bool = True
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    sent_at: Optional[str] = None
+    error_message: Optional[str] = None
+

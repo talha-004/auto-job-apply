@@ -1,7 +1,7 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from app.models.job import SearchConfig, BotStatusResponse, LogMessage
+from app.models.job import SearchConfig, BotStatusResponse, LogMessage, DiscoveryConfig, DiscoveredJob
 from app.services.bot_manager import bot_manager
 from app.core.logger import broadcaster
 
@@ -73,4 +73,76 @@ async def get_preflight_check() -> Dict[str, Any]:
 async def run_preflight_with_config(config: SearchConfig) -> Dict[str, Any]:
     """Run preflight validation against specific run configuration."""
     return await bot_manager.run_preflight_check(config)
+
+@router.post("/discover")
+async def discover_jobs_endpoint(config: Optional[DiscoveryConfig] = None) -> Dict[str, Any]:
+    """Rapidly discover jobs across multiple platforms via fast HTTP endpoints."""
+    from app.services.discovery.discovery_manager import discovery_manager
+    cfg = config or DiscoveryConfig()
+    jobs = await discovery_manager.discover_jobs(cfg)
+    return {
+        "success": True,
+        "count": len(jobs),
+        "jobs": [j.model_dump() for j in jobs]
+    }
+
+
+# --- Autonomous Scheduler Endpoints ---
+
+from app.services.scheduler import (
+    scheduler_service,
+    SchedulerStatusResponse,
+    SchedulerConfigRequest
+)
+
+
+class ToggleJobRequest(BaseModel):
+    enabled: bool
+
+
+@router.get("/scheduler/status", response_model=SchedulerStatusResponse)
+async def get_scheduler_status():
+    """Retrieve active background jobs, next execution times, and daily quotas."""
+    return scheduler_service.get_status()
+
+
+@router.post("/scheduler/start")
+async def start_scheduler():
+    """Start autonomous background scheduler."""
+    scheduler_service.start()
+    return {"success": True, "message": "Background autonomous scheduler started."}
+
+
+@router.post("/scheduler/stop")
+async def stop_scheduler():
+    """Stop autonomous background scheduler."""
+    scheduler_service.shutdown()
+    return {"success": True, "message": "Background autonomous scheduler stopped."}
+
+
+@router.post("/scheduler/config", response_model=SchedulerStatusResponse)
+async def update_scheduler_config(config: SchedulerConfigRequest):
+    """Update morning cron schedule, headline refresh interval, and daily cap."""
+    scheduler_service.update_config(config)
+    return scheduler_service.get_status()
+
+
+@router.post("/scheduler/trigger/{job_id}")
+async def trigger_scheduler_job(job_id: str):
+    """Manually trigger an immediate run of a scheduled job."""
+    triggered = await scheduler_service.trigger_job_now(job_id)
+    if not triggered:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return {"success": True, "message": f"Job '{job_id}' triggered successfully."}
+
+
+@router.post("/scheduler/toggle/{job_id}")
+async def toggle_scheduler_job(job_id: str, payload: ToggleJobRequest):
+    """Pause or resume a specific scheduled job."""
+    toggled = scheduler_service.toggle_job(job_id, payload.enabled)
+    if not toggled:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    action = "resumed" if payload.enabled else "paused"
+    return {"success": True, "message": f"Job '{job_id}' {action}."}
+
 

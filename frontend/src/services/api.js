@@ -108,6 +108,143 @@ export const jobsAPI = {
   },
 };
 
+export const vaultAPI = {
+  getVault: async () => {
+    const response = await apiClient.get('/resume/vault');
+    return response.data;
+  },
+
+  updateVault: async (vaultData) => {
+    const response = await apiClient.put('/resume/vault', vaultData);
+    return response.data;
+  },
+};
+
+export const schedulerAPI = {
+  getStatus: async () => {
+    const response = await apiClient.get('/bot/scheduler/status');
+    return response.data;
+  },
+
+  start: async () => {
+    const response = await apiClient.post('/bot/scheduler/start');
+    return response.data;
+  },
+
+  stop: async () => {
+    const response = await apiClient.post('/bot/scheduler/stop');
+    return response.data;
+  },
+
+  updateConfig: async (config) => {
+    const response = await apiClient.post('/bot/scheduler/config', config);
+    return response.data;
+  },
+
+  triggerJob: async (jobId) => {
+    const response = await apiClient.post(`/bot/scheduler/trigger/${jobId}`);
+    return response.data;
+  },
+
+  toggleJob: async (jobId, enabled) => {
+    const response = await apiClient.post(`/bot/scheduler/toggle/${jobId}`, { enabled });
+    return response.data;
+  },
+};
+
+export const outreachAPI = {
+  getMessages: async (status = null, limit = 50) => {
+    const query = status ? `?status=${status}&limit=${limit}` : `?limit=${limit}`;
+    const response = await apiClient.get(`/outreach/messages${query}`);
+    return response.data;
+  },
+
+  sendEmail: async (outreachId, forceSend = true) => {
+    const response = await apiClient.post('/outreach/send', {
+      outreach_id: outreachId,
+      force_send: forceSend,
+    });
+    return response.data;
+  },
+
+  declineMessage: async (outreachId) => {
+    const response = await apiClient.post(`/outreach/decline/${outreachId}`);
+    return response.data;
+  },
+
+  getWhatsAppUrl: async (phone, message) => {
+    const response = await apiClient.get(`/outreach/whatsapp-url?phone=${encodeURIComponent(phone)}&message=${encodeURIComponent(message)}`);
+    return response.data;
+  },
+
+  extractContacts: async (payload) => {
+    const response = await apiClient.post('/outreach/extract-contacts', payload);
+    return response.data;
+  },
+
+  draftOutreach: async (payload) => {
+    const response = await apiClient.post('/outreach/draft', payload);
+    return response.data;
+  },
+};
+
+export const screeningAPI = {
+  answerQuestion: async (payload) => {
+    const response = await apiClient.post('/screening/answer', payload);
+    return response.data;
+  },
+
+  batchAnswer: async (questions, jobContext = null) => {
+    const response = await apiClient.post('/screening/batch', {
+      questions,
+      job_context: jobContext,
+    });
+    return response.data;
+  },
+
+  getProviders: async () => {
+    const response = await apiClient.get('/screening/providers');
+    return response.data;
+  },
+};
+
+export const tailoredResumeAPI = {
+  tailorResume: async (jobTitle, jobDescription, jobId = null) => {
+    const response = await apiClient.post('/resume/tailor', {
+      job_title: jobTitle,
+      job_description: jobDescription,
+      job_id: jobId,
+    });
+    return response.data;
+  },
+
+  getDownloadUrl: (jobId) => {
+    return `${API_BASE}/resume/tailored/${jobId}/download`;
+  },
+};
+
+export const notificationsAPI = {
+  getConfig: async () => {
+    const response = await apiClient.get('/notifications/config');
+    return response.data;
+  },
+
+  sendTestNotification: async (payload = {}) => {
+    const response = await apiClient.post('/notifications/test', payload);
+    return response.data;
+  },
+
+  classifyEmail: async (payload) => {
+    const response = await apiClient.post('/notifications/classify-email', payload);
+    return response.data;
+  },
+
+  scanInbox: async (maxEmails = 10) => {
+    const response = await apiClient.post(`/notifications/scan-inbox?max_emails=${maxEmails}`);
+    return response.data;
+  },
+};
+
 export const settingsAPI = {
   getSystemStatus: async () => {
     const response = await apiClient.get('/settings/status');

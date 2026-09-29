@@ -1,12 +1,19 @@
 import React from 'react';
 import { useBot } from '../context/BotContext';
-import { Bot, Cpu, Sparkles, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Bot, Cpu, Sparkles, ShieldCheck, AlertCircle, ShieldAlert, Database, Clock, LayoutDashboard } from 'lucide-react';
 
-export const Navbar = () => {
+export const Navbar = ({ activeTab = 'dashboard', onSelectTab, interventionCount = 0 }) => {
   const { systemHealth, status } = useBot();
 
   const ollamaOnline = systemHealth?.llm?.online;
   const configuredModel = systemHealth?.llm?.configured_model || 'qwen2.5-coder:7b';
+
+  const navItems = [
+    { id: 'dashboard', label: 'Bot Dashboard', icon: LayoutDashboard },
+    { id: 'interventions', label: 'Interventions', icon: ShieldAlert, badge: interventionCount },
+    { id: 'vault', label: 'QA Vault', icon: Database },
+    { id: 'scheduler', label: 'Scheduler', icon: Clock },
+  ];
 
   return (
     <header style={{
@@ -16,13 +23,15 @@ export const Navbar = () => {
       position: 'sticky',
       top: 0,
       zIndex: 50,
-      padding: '14px 28px',
+      padding: '12px 28px',
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between'
+      justifyContent: 'space-between',
+      gap: '16px',
+      flexWrap: 'wrap'
     }}>
       {/* Brand */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }} onClick={() => onSelectTab && onSelectTab('dashboard')}>
         <div style={{
           width: '38px',
           height: '38px',
@@ -48,14 +57,67 @@ export const Navbar = () => {
               color: 'var(--primary)',
               fontWeight: '600'
             }}>
-              LOCAL & FREE
+              AUTONOMOUS AI
             </span>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            Autonomous Job Application Engine with Local AI
+            Enterprise Agent with Local AI & Scheduler
           </p>
         </div>
       </div>
+
+      {/* Navigation Tabs */}
+      <nav style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        background: 'var(--bg-input)',
+        padding: '4px',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border-color)'
+      }}>
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onSelectTab && onSelectTab(item.id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 14px',
+                borderRadius: 'var(--radius-sm)',
+                border: 'none',
+                background: isActive ? 'var(--primary-dark)' : 'transparent',
+                color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                fontSize: '0.85rem',
+                fontWeight: isActive ? 600 : 500,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                position: 'relative'
+              }}
+            >
+              <Icon size={15} />
+              <span>{item.label}</span>
+              {Boolean(item.badge) && item.badge > 0 && (
+                <span style={{
+                  padding: '1px 6px',
+                  borderRadius: '999px',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  background: 'var(--danger)',
+                  color: '#fff',
+                  marginLeft: '2px'
+                }}>
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
 
       {/* System Status Indicators */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>

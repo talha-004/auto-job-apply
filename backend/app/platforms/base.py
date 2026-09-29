@@ -25,10 +25,12 @@ from app.models.job import (
     JobLifecycleStatus,
     ReasonCode,
     LogLevel,
-    PlatformEnum
+    PlatformEnum,
+    QAVault
 )
 from app.services.excel_tracker import excel_tracker
 from app.platforms.naukri_helpers import normalize_token
+from app.platforms.adapter_interface import ApplicationAdapter, AdapterApplicationResult
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -47,7 +49,35 @@ class PersistenceError(Exception):
     pass
 
 
-class BasePlatform(ABC):
+class PersistentBrowserBridge:
+    """Compatibility bridge providing Browser-like interface over persistent BrowserContext."""
+
+    def __init__(self, context: BrowserContext):
+        self._context = context
+        self._connected = True
+
+    def is_connected(self) -> bool:
+        if not self._connected or not self._context:
+            return False
+        try:
+            connection = getattr(self._context, "_connection", None)
+            if connection:
+                return not getattr(connection, "is_closed", False)
+            return True
+        except Exception:
+            return False
+
+    async def close(self):
+        self._connected = False
+        if self._context:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
+
+
+class BasePlatform(ApplicationAdapter, ABC):
     def __init__(
         self,
         platform_name: PlatformEnum,
@@ -72,6 +102,8 @@ class BasePlatform(ABC):
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
         self.cookie_file = settings.COOKIES_DIR / f"{self.platform_name.value.lower()}_cookies.json"
+        self.user_data_dir = settings.BROWSER_USER_DATA_DIR / self.platform_name.value.lower()
+        self.is_persistent_context: bool = False
         self.run_id: str = getattr(config, "run_id", None) or f"RUN-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         self.attempt_counters: Dict[str, int] = {}
 
@@ -98,26 +130,6 @@ class BasePlatform(ABC):
             self.config.headless
         )
 
-        try:
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.config.headless,
-                args=launch_args,
-                slow_mo=50,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to launch Playwright Chromium | headless=%s",
-                self.config.headless,
-            )
-            raise
-
-        mode_text = "headless mode" if self.config.headless else "visible mode"
-        await broadcaster.emit_log(
-            f"🌐 Browser launched in {mode_text}",
-            level=LogLevel.INFO,
-            platform=self.platform_name.value
-        )
-
         context_options = {
             "viewport": {"width": viewport_width, "height": viewport_height},
             "user_agent": user_agent,
@@ -134,12 +146,62 @@ class BasePlatform(ABC):
             context_options["proxy"] = {"server": settings.PROXY_URL}
             logger.info(f"Configured proxy for {self.platform_name.value}: {settings.PROXY_URL}")
 
-        self.context = await self.browser.new_context(**context_options)
+        # 1. Attempt persistent context if enabled (maintains cookies, storage, IndexedDB across sessions)
+        if settings.USE_PERSISTENT_CONTEXT:
+            self.user_data_dir.mkdir(exist_ok=True, parents=True)
+            try:
+                logger.info(
+                    "Launching persistent context: dir=%s, headless=%s",
+                    self.user_data_dir,
+                    self.config.headless
+                )
+                self.context = await self.playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(self.user_data_dir),
+                    headless=self.config.headless,
+                    args=launch_args,
+                    slow_mo=50,
+                    **context_options
+                )
+                self.is_persistent_context = True
+                self.browser = PersistentBrowserBridge(self.context)
+                self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+                # Extra safety: also inject any existing standalone cookie backup
+                await self._load_cookies()
+            except Exception as e:
+                logger.warning(
+                    f"Persistent context launch failed for {self.platform_name.value} "
+                    f"(profile locked or unavailable): {e}. Falling back to standard browser session."
+                )
+                self.is_persistent_context = False
+                self.context = None
 
-        # Load saved session cookies if available
-        await self._load_cookies()
+        # 2. Standard browser launch fallback if persistent context is disabled or failed
+        if not self.context:
+            try:
+                self.browser = await self.playwright.chromium.launch(
+                    headless=self.config.headless,
+                    args=launch_args,
+                    slow_mo=50,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to launch Playwright Chromium | headless=%s",
+                    self.config.headless,
+                )
+                raise
 
-        self.page = await self.context.new_page()
+            self.context = await self.browser.new_context(**context_options)
+            await self._load_cookies()
+            self.page = await self.context.new_page()
+
+        mode_text = "headless mode" if self.config.headless else "visible mode"
+        context_type = "persistent profile" if self.is_persistent_context else "standard session"
+        await broadcaster.emit_log(
+            f"🌐 Browser launched in {mode_text} ({context_type})",
+            level=LogLevel.INFO,
+            platform=self.platform_name.value
+        )
+
         if not self.config.headless:
             try:
                 await self.page.bring_to_front()
@@ -164,15 +226,48 @@ class BasePlatform(ABC):
 
     async def close_browser(self):
         """Save cookies and cleanly shut down browser instances."""
-        try:
-            if self.context:
+        if self.context:
+            try:
                 await self._save_cookies()
-            if self.browser:
+            except Exception as e:
+                logger.debug(f"Cookie save skipped/failed during teardown: {e}")
+        if self.page:
+            try:
+                if not self.page.is_closed():
+                    await self.page.close()
+            except Exception:
+                pass
+            finally:
+                self.page = None
+
+        if self.is_persistent_context and self.context:
+            try:
+                if self.browser:
+                    await self.browser.close()
+                else:
+                    await self.context.close()
+            except Exception as e:
+                logger.debug(f"Persistent context close error: {e}")
+            finally:
+                self.context = None
+                self.browser = None
+                self.is_persistent_context = False
+        elif self.browser:
+            try:
                 await self.browser.close()
-            if self.playwright:
+            except Exception as e:
+                logger.debug(f"Browser close error during teardown: {e}")
+            finally:
+                self.browser = None
+                self.context = None
+
+        if self.playwright:
+            try:
                 await self.playwright.stop()
-        except Exception as e:
-            logger.warning(f"Error during browser teardown: {e}")
+            except Exception as e:
+                logger.debug(f"Playwright stop error during teardown: {e}")
+            finally:
+                self.playwright = None
 
     async def _save_cookies(self):
         """Persist session cookies to local storage for automatic login reuse."""
@@ -191,11 +286,82 @@ class BasePlatform(ABC):
             try:
                 with open(self.cookie_file, "r", encoding="utf-8") as f:
                     cookies = json.load(f)
-                    if cookies:
+                    if cookies and self.context:
                         await self.context.add_cookies(cookies)
                         logger.info(f"Loaded {len(cookies)} saved cookies for {self.platform_name.value}")
             except Exception as e:
                 logger.warning(f"Could not load cookies for {self.platform_name.value}: {e}")
+
+    def get_saved_cookies(self) -> List[Dict[str, Any]]:
+        """Return list of saved cookies from disk."""
+        if not self.cookie_file.exists():
+            return []
+        try:
+            with open(self.cookie_file, "r", encoding="utf-8") as f:
+                return json.load(f) or []
+        except Exception:
+            return []
+
+    async def is_session_valid(self) -> bool:
+        """
+        Validate whether the current browser context or saved cookie file contains
+        an active, non-expired authentication session for this platform.
+        """
+        cookies = []
+        if self.context:
+            try:
+                cookies = await self.context.cookies()
+            except Exception:
+                pass
+
+        if not cookies:
+            cookies = self.get_saved_cookies()
+
+        if not cookies:
+            return False
+
+        now_ts = datetime.now().timestamp()
+        platform_lower = self.platform_name.value.lower()
+
+        # Platform-specific auth indicator cookies
+        auth_keys = {
+            "naukri": ["naukri_auth", "acctype", "user", "nauk_auth", "profileid"],
+            "linkedin": ["li_at", "li_a", "jsessionid", "bcookie", "bscookie"],
+            "indeed": ["csrf", "surf", "ctk", "optimizelyenduserid"],
+        }
+        target_keys = auth_keys.get(platform_lower, ["auth", "token", "session", "user"])
+
+        for cookie in cookies:
+            cookie_name = cookie.get("name", "").lower()
+            expires = cookie.get("expires", -1)
+
+            # Check if expired
+            if expires and expires > 0 and expires < now_ts:
+                continue
+
+            # Check if matches auth indicators
+            if any(k in cookie_name for k in target_keys):
+                return True
+
+        return False
+
+    def clear_saved_session(self, clear_profile_dir: bool = False):
+        """Remove saved cookie file and optionally clear persistent profile cache."""
+        if self.cookie_file.exists():
+            try:
+                self.cookie_file.unlink()
+                logger.info(f"Cleared cookie file {self.cookie_file}")
+            except Exception as e:
+                logger.warning(f"Failed to delete cookie file: {e}")
+
+        if clear_profile_dir and self.user_data_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(self.user_data_dir, ignore_errors=True)
+                logger.info(f"Cleared persistent profile directory {self.user_data_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to clear user data dir: {e}")
+
 
     async def check_pause_and_stop(self):
         """Check if user requested pause or stop."""
@@ -209,6 +375,8 @@ class BasePlatform(ABC):
                 platform=self.platform_name.value
             )
             await self.pause_event.wait()
+            if self.stop_event.is_set():
+                raise asyncio.CancelledError("Bot run cancelled by user.")
             await broadcaster.emit_log(
                 f"Bot RESUMED execution on {self.platform_name.value}.",
                 level=LogLevel.INFO,
@@ -308,12 +476,16 @@ class BasePlatform(ABC):
         """Cleanly close any opened popups/tabs, keeping only the main navigation page."""
         if not self.context:
             return
-        for p in list(self.context.pages):
-            if p != self.page and not p.is_closed():
-                try:
+        try:
+            pages = list(self.context.pages)
+        except Exception:
+            return
+        for p in pages:
+            try:
+                if p != self.page and not p.is_closed():
                     await p.close()
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
     def is_title_relevant(self, job_title: str) -> bool:
         """
@@ -324,7 +496,10 @@ class BasePlatform(ABC):
         keywords_lower = (self.config.keywords or "").lower()
 
         # 1. Seniority Check: Filter executive / senior leadership roles for junior/mid candidates
-        candidate_exp = float(getattr(self.profile, "years_of_experience", 2.0) or 2.0) if self.profile else 2.0
+        try:
+            candidate_exp = float(getattr(self.profile, "years_of_experience", 2.0) or 2.0) if self.profile else 2.0
+        except (ValueError, TypeError):
+            candidate_exp = 2.0
         if candidate_exp <= 4.0:
             executive_markers = [
                 "cto", "chief technology officer", "chief technical officer",
@@ -566,7 +741,9 @@ class BasePlatform(ABC):
         # Step 1: Request LLM field mapping
         mapping = {}
         try:
-            mapping = await llm_client.map_form_fields(profile_dict, fields, job_context)
+            raw_map = await llm_client.map_form_fields(profile_dict, fields, job_context)
+            if isinstance(raw_map, dict):
+                mapping = raw_map
             logger.info(f"LLM field mapping for {job_title}: {mapping}")
         except Exception as e:
             logger.warning(f"LLM mapping error (using heuristic fallback): {e}")
@@ -602,6 +779,18 @@ class BasePlatform(ABC):
                     mapping[f_id] = str(self.profile.years_of_experience)
                 elif any(w in combined for w in ["notice", "notice period"]):
                     mapping[f_id] = "Immediate"
+                elif any(w in combined for w in ["current ctc", "present ctc", "current salary", "fixed ctc"]):
+                    mapping[f_id] = str(self.profile.custom_answers.get("current_ctc_lpa", "Negotiable"))
+                elif any(w in combined for w in ["expected ctc", "expected salary"]):
+                    mapping[f_id] = str(self.profile.custom_answers.get("expected_ctc_lpa", "Negotiable"))
+                elif any(w in combined for w in ["current company", "current employer", "organization", "present company"]):
+                    mapping[f_id] = self.profile.work_experience[0].company if self.profile.work_experience else ""
+                elif any(w in combined for w in ["designation", "current role", "current title", "job title"]):
+                    mapping[f_id] = self.profile.work_experience[0].title if self.profile.work_experience else ""
+                elif any(w in combined for w in ["qualification", "highest degree", "education", "degree"]):
+                    mapping[f_id] = self.profile.education[0].degree if self.profile.education else ""
+                elif any(w in combined for w in ["key skills", "primary skill", "technical skill"]):
+                    mapping[f_id] = ", ".join(self.profile.skills[:5]) if self.profile.skills else ""
 
         # Step 3: Populate each field using direct DOM handles
         for field in fields:
@@ -614,14 +803,28 @@ class BasePlatform(ABC):
 
             target_val = mapping.get(field_id) or mapping.get(field_name)
 
+            elem_handle = None
             try:
-                # Retrieve exact element via DOM index
-                js_getter = """(idx) => {
-                    const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea');
-                    return inputs[idx] || null;
-                }"""
-                elem_handle = await page.evaluate_handle(js_getter, field_idx)
-                elem = elem_handle.as_element()
+                # Retrieve exact element via DOM index scoped to container if provided
+                if container:
+                    elem_handle = await container.evaluate_handle(
+                        """(root, idx) => {
+                            const scope = root || document;
+                            const inputs = scope.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea');
+                            return inputs[idx] || null;
+                        }""",
+                        field_idx
+                    )
+                else:
+                    elem_handle = await page.evaluate_handle(
+                        """(idx) => {
+                            const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea');
+                            return inputs[idx] || null;
+                        }""",
+                        field_idx
+                    )
+
+                elem = elem_handle.as_element() if elem_handle else None
                 if not elem:
                     continue
 
@@ -652,7 +855,23 @@ class BasePlatform(ABC):
                         try:
                             await elem.select_option(value=str(target_val), timeout=3000)
                         except Exception:
-                            pass
+                            try:
+                                opt_val = await elem.evaluate(
+                                    """(sel, val) => {
+                                        const target = (val || '').toLowerCase();
+                                        for (const opt of sel.options) {
+                                            if (opt.text.toLowerCase().includes(target) || opt.value.toLowerCase().includes(target)) {
+                                                return opt.value;
+                                            }
+                                        }
+                                        return null;
+                                    }""",
+                                    str(target_val)
+                                )
+                                if opt_val is not None:
+                                    await elem.select_option(value=opt_val, timeout=3000)
+                            except Exception:
+                                pass
                 else: # text, email, tel, number, textarea
                     try:
                         await elem.click(timeout=3000)
@@ -663,6 +882,12 @@ class BasePlatform(ABC):
                 await asyncio.sleep(0.15)
             except Exception as e:
                 logger.warning(f"Could not fill field {field_id}: {e}")
+            finally:
+                if elem_handle:
+                    try:
+                        await elem_handle.dispose()
+                    except Exception:
+                        pass
 
         return True
 
@@ -734,13 +959,19 @@ class BasePlatform(ABC):
                     await self.fill_form_with_llm(job_title, company, target_page=page)
 
                 # Check for "Next" / "Continue" vs final "Submit"
-                next_btn = await page.query_selector("button:has-text('Next'), button:has-text('Continue'), input[value='Next'], input[value='Continue']")
-                submit_btn = await page.query_selector("button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit'), input[type='submit'], button:has-text('Send Application'), button:has-text('Apply')")
+                next_btn = await page.query_selector(
+                    "button:has-text('Next'), button:has-text('Continue'), button:has-text('Save and Continue'), button:has-text('Save & Continue'), input[value='Next'], input[value='Continue'], button[data-automation-id*='next']"
+                )
+                submit_btn = await page.query_selector(
+                    "button[type='submit'], button:has-text('Submit Application'), button:has-text('Submit'), button:has-text('Submit your application'), input[type='submit'], button:has-text('Send Application'), button:has-text('Apply'), button[data-automation-id*='submit']"
+                )
 
                 if next_btn and await next_btn.is_visible() and (not submit_btn or not await submit_btn.is_visible()):
                     await broadcaster.emit_log(f"Proceeding to next step on {company} application...", platform=self.platform_name.value)
                     if not self.config.dry_run:
-                        await next_btn.click()
+                        clicked = await self.safe_click(next_btn, timeout=4000)
+                        if not clicked:
+                            await next_btn.click(timeout=3000)
                         await asyncio.sleep(3)
                         continue
 
@@ -748,7 +979,9 @@ class BasePlatform(ABC):
                 if submit_btn and await submit_btn.is_visible():
                     if not self.config.dry_run:
                         await broadcaster.emit_log(f"Submitting final application to {company}...", level=LogLevel.ACTION, platform=self.platform_name.value)
-                        await submit_btn.click()
+                        clicked = await self.safe_click(submit_btn, timeout=5000)
+                        if not clicked:
+                            await submit_btn.click(timeout=4000)
                         await asyncio.sleep(3)
                     return True
 
@@ -826,11 +1059,21 @@ class BasePlatform(ABC):
             await element.scroll_into_view_if_needed(timeout=timeout)
             await element.wait_for_element_state("visible", timeout=timeout)
             await element.wait_for_element_state("enabled", timeout=timeout)
+        except Exception as e:
+            logger.debug(f"safe_click state verification failed: {e}")
+            return False
+
+        try:
             await element.click(timeout=timeout)
             return True
         except Exception as e:
-            logger.debug(f"safe_click failed safely: {e}")
-            return False
+            logger.debug(f"safe_click standard click failed ({e}); attempting resilient JS click fallback")
+            try:
+                await element.evaluate("(el) => { el.scrollIntoView({block: 'center'}); el.click(); }")
+                return True
+            except Exception as e2:
+                logger.debug(f"safe_click resilient fallback failed: {e2}")
+                return False
 
     async def initialize_session(self) -> bool:
         """Verify session credentials, cookie validity, profile availability, and search connectivity."""
@@ -955,3 +1198,75 @@ class BasePlatform(ABC):
     async def search_and_apply(self) -> int:
         """Search jobs and apply up to configured max applications."""
         pass
+
+    def detect(self, url: str, page_content: Optional[str] = None) -> bool:
+        """Default platform URL detection."""
+        return self.platform_name.value.lower() in url.lower()
+
+    async def authenticate(self) -> bool:
+        """Adapter bridge to login."""
+        return await self.login()
+
+    async def extract_form(self, page: Any) -> Dict[str, Any]:
+        """Extract interactive form fields from page."""
+        fields = []
+        try:
+            inputs = await page.query_selector_all("input, select, textarea")
+            for inp in inputs:
+                name = await inp.get_attribute("name") or await inp.get_attribute("id") or ""
+                if name:
+                    fields.append(name)
+        except Exception:
+            pass
+        return {"fields": fields}
+
+    async def fill_form(
+        self,
+        page: Any,
+        profile: ResumeProfile,
+        qa_vault: Optional[QAVault] = None
+    ) -> Dict[str, Any]:
+        """Base fill_form implementation."""
+        return {"status": "filled"}
+
+    async def submit(self, page: Any) -> bool:
+        """Attempt safe click on submit buttons."""
+        submit_selectors = [
+            "button[type='submit']",
+            "button:has-text('Submit')",
+            "button:has-text('Apply')",
+            "button:has-text('Submit Application')"
+        ]
+        for sel in submit_selectors:
+            try:
+                btn = await page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await self.safe_click(btn, op_name="Submit Application")
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def verify_submission(self, page: Any) -> Tuple[bool, str]:
+        """Bridge to verify_application_result."""
+        res = await self.verify_application_result(page)
+        if res == VerificationResult.CONFIRMED_SUCCESS:
+            return True, "Application verified as submitted."
+        elif res == VerificationResult.CONFIRMED_FAILURE:
+            return False, "Application failed or rejected."
+        return False, "Submission status unverified or pending."
+
+    async def apply(
+        self,
+        job_url: str,
+        profile: ResumeProfile,
+        qa_vault: Optional[QAVault] = None
+    ) -> AdapterApplicationResult:
+        """Base adapter application pipeline bridge."""
+        return AdapterApplicationResult(
+            success=False,
+            status=ApplicationStatus.FAILED,
+            job_url=job_url,
+            message="BasePlatform does not implement standalone URL apply directly."
+        )
+

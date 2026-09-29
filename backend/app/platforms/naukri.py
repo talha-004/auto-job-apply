@@ -230,7 +230,7 @@ class NaukriPlatform(BasePlatform):
             await self.fill_form_with_llm(job_title, company, target_page=job_page, container=chat_modal)
 
             # 2. Choice chips / questionnaire questions
-            chips = await chat_modal.query_selector_all(".chip, .option-chip, .radio-chip, li.chip, .bot-option, .msg-choice")
+            chips = await chat_modal.query_selector_all(".chip, .option-chip, .radio-chip, li.chip, .bot-option, .msg-choice, label[class*='radio'], label[class*='option'], .custom-radio, .bot-btn, button[class*='chip'], div[class*='chip']")
             visible_chips = [c for c in chips if await c.is_visible()]
 
             if visible_chips:
@@ -243,10 +243,32 @@ class NaukriPlatform(BasePlatform):
 
                 # Tier 1: Deterministic resolution
                 notice_period = self.profile.custom_answers.get("notice_period_days")
+                cand_exp = float(getattr(self.profile, "years_of_experience", 1.5) or 1.5)
+
                 if "notice" in q_lower and notice_period is not None:
                     norm_notice = normalize_token(f"{notice_period} days")
                     for idx, opt in enumerate(displayed_options):
                         if norm_notice == normalize_token(opt) or str(notice_period) in opt:
+                            chosen_chip = visible_chips[idx]
+                            break
+
+                elif any(w in q_lower for w in ["experience", "total exp", "years of exp"]):
+                    # Match candidate experience range e.g. "1-2 years", "1 to 2", or "1"
+                    for idx, opt in enumerate(displayed_options):
+                        opt_l = opt.lower()
+                        if f"{int(cand_exp)}" in opt_l or ("1-2" in opt_l and cand_exp <= 2) or ("1-3" in opt_l and cand_exp <= 3):
+                            chosen_chip = visible_chips[idx]
+                            break
+
+                elif any(w in q_lower for w in ["relocate", "willing to relocate"]):
+                    for idx, opt in enumerate(displayed_options):
+                        if opt.lower().strip() in ("yes", "willing", "open to relocate"):
+                            chosen_chip = visible_chips[idx]
+                            break
+
+                elif any(w in q_lower for w in ["immediate", "join immediately"]):
+                    for idx, opt in enumerate(displayed_options):
+                        if opt.lower().strip() in ("yes", "immediate", "immediately"):
                             chosen_chip = visible_chips[idx]
                             break
 
@@ -258,6 +280,11 @@ class NaukriPlatform(BasePlatform):
                             if norm_auth == normalize_token(opt):
                                 chosen_chip = visible_chips[idx]
                                 break
+                    else:
+                        for idx, opt in enumerate(displayed_options):
+                            if opt.lower().strip() == "yes":
+                                chosen_chip = visible_chips[idx]
+                                break
 
                 elif "sponsorship" in q_lower:
                     spons = self.profile.custom_answers.get("require_sponsorship")
@@ -265,6 +292,11 @@ class NaukriPlatform(BasePlatform):
                         norm_spons = normalize_token(spons)
                         for idx, opt in enumerate(displayed_options):
                             if norm_spons == normalize_token(opt):
+                                chosen_chip = visible_chips[idx]
+                                break
+                    else:
+                        for idx, opt in enumerate(displayed_options):
+                            if opt.lower().strip() == "no":
                                 chosen_chip = visible_chips[idx]
                                 break
 
@@ -454,9 +486,9 @@ class NaukriPlatform(BasePlatform):
                     job_title = "Software Engineer"
                     company = "Tech Firm"
                     try:
-                        title_elem = await tuple_elem.query_selector(".title, a.title")
-                        company_elem = await tuple_elem.query_selector(".comp-name, a.comp-name")
-                        loc_elem = await tuple_elem.query_selector(".loc-wrap, .loc, .styles_loc-wrap__nn_1b, .location")
+                        title_elem = await tuple_elem.query_selector(".title, a.title, a[class*='title'], a[href*='job-listings'], h2 a, .job-title a")
+                        company_elem = await tuple_elem.query_selector(".comp-name, a.comp-name, .subTitle, a.subTitle, [class*='comp-name'], [class*='company-name']")
+                        loc_elem = await tuple_elem.query_selector(".loc-wrap, .loc, .styles_loc-wrap__nn_1b, .location, [class*='loc-wrap'], [class*='location']")
                         
                         job_title = (await title_elem.inner_text()).strip() if title_elem else "Software Engineer"
                         company = (await company_elem.inner_text()).strip() if company_elem else "Tech Firm"
@@ -567,9 +599,30 @@ class NaukriPlatform(BasePlatform):
                         except Exception:
                             pass
 
-                        # 6. Extract Job Description Text
-                        jd_elem = await job_page.query_selector("section.styles_job-desc-container__g_JuN, section.job-desc, .job-desc, .styles_job-desc-container__tx70f, .styles_JDJOB-wrap__nNZjJ, .jdContainer, .clearJobs")
+                        # Expand collapsed Job Description if 'Read more' button exists
+                        try:
+                            read_more_btns = await job_page.query_selector_all("span:has-text('Read more'), button:has-text('Read more'), a:has-text('Read more'), .read-more, .styles_read-more__3eG3B, [class*='read-more'], [class*='readMore']")
+                            for rmb in read_more_btns:
+                                if await rmb.is_visible():
+                                    await rmb.click()
+                                    await asyncio.sleep(0.5)
+                                    break
+                        except Exception:
+                            pass
+
+                        # 6. Extract Job Description Text & Key Skill Tags
+                        jd_elem = await job_page.query_selector("section.styles_job-desc-container__g_JuN, section.job-desc, .job-desc, .styles_job-desc-container__tx70f, .styles_JDJOB-wrap__nNZjJ, .jdContainer, .clearJobs, section[class*='job-desc'], div[class*='job-desc']")
                         jd_text = (await jd_elem.inner_text()).strip() if jd_elem else (await job_page.inner_text("body"))
+
+                        # Also capture Key Skills chips/tags if presented separately on page
+                        try:
+                            skills_elem = await job_page.query_selector("div.styles_key-skill__e_3Zp, .key-skills, .styles_chip-wrapper__1r9P5, [class*='key-skill'], [class*='styles_chip']")
+                            if skills_elem:
+                                skills_text = (await skills_elem.inner_text()).strip()
+                                if skills_text:
+                                    jd_text = f"{jd_text}\n\nKey Skills: {skills_text}"
+                        except Exception:
+                            pass
 
                         # 7. Extract Recruiter Text & Contacts
                         rec_elem = await job_page.query_selector(".recruiter-details, .rec-name, .posted-by, .rec-details")
@@ -724,9 +777,27 @@ class NaukriPlatform(BasePlatform):
                             continue
 
                         # 14. Apply Execution Gate
-                        apply_btn = await job_page.query_selector(
-                            "#apply-button, button.apply-button, .apply-message, button:has-text('Apply'), a:has-text('Apply'), button:has-text('Apply on company site'), a:has-text('Apply on company site'), a:has-text('Apply on website')"
-                        )
+                        apply_selectors = [
+                            "#apply-button",
+                            "button.apply-button",
+                            ".apply-button",
+                            "button[class*='apply-button']",
+                            "button[class*='apply-btn']",
+                            "button:has-text('Apply on company site')",
+                            "a:has-text('Apply on company site')",
+                            "button:has-text('Apply on website')",
+                            "a:has-text('Apply on website')",
+                            "button:has-text('Apply')",
+                            "a:has-text('Apply')",
+                            ".apply-message"
+                        ]
+                        apply_btn = None
+                        for sel in apply_selectors:
+                            el = await job_page.query_selector(sel)
+                            if el and await el.is_visible():
+                                apply_btn = el
+                                break
+
                         if not apply_btn:
                             excel_tracker.update_application_status(
                                 job_link,
@@ -968,7 +1039,14 @@ class NaukriPlatform(BasePlatform):
 
                     except ApplicationLimitDetected:
                         raise
+                    except asyncio.CancelledError:
+                        raise
                     except Exception as e:
+                        err_str = str(e).lower()
+                        if "closed" in err_str and any(w in err_str for w in ["target", "browser", "context"]):
+                            logger.warning(f"Browser context closed during Naukri processing: {e}")
+                            break
+
                         logger.warning(f"Error applying on Naukri item #{idx}: {e}")
                         try:
                             # Persistence invariant: Never leave a discovered/analyzed job unrecorded
@@ -997,10 +1075,21 @@ class NaukriPlatform(BasePlatform):
                 # Pagination
                 await self.dismiss_notification_prompts(self.page)
                 next_btn = await self.page.query_selector("a.styles_btn-secondary__2AsIS:has-text('Next'), a:has-text('Next')")
-                if next_btn:
+                if next_btn and await next_btn.is_visible():
                     current_page += 1
-                    await next_btn.click()
-                    await self.human_delay(3.0, 5.0)
+                    clicked = await self.safe_click(next_btn, timeout=5000)
+                    if not clicked:
+                        logger.info("Could not safely click next page button; ending pagination.")
+                        break
+                    try:
+                        await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+                    try:
+                        await self.page.wait_for_selector(".srp-jobtuple-wrapper, .cust-job-tuple, article.jobTuple, div[data-job-id]", timeout=8000)
+                    except Exception:
+                        pass
+                    await self.human_delay(2.5, 4.5)
                 else:
                     break
 

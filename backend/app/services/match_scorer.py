@@ -4,7 +4,7 @@ Follows an explicit 60/20/10/10 scoring contract with exact mathematical fallbac
 """
 
 import re
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, Any
 from pydantic import BaseModel, Field
 
 from app.models.job import ResumeProfile
@@ -44,7 +44,8 @@ class MatchScorer:
         "git", "rest", "graphql", "tailwind", "nextjs", "vue", "angular", "c++",
         "java", "spring", "springboot", "spring boot", "golang", "rust", "ci/cd", "linux", "agile", "scrum",
         ".net", "dotnet", "c#", "csharp", "asp.net", "php", "laravel", "ruby", "rails",
-        "flutter", "dart", "salesforce", "swift", "kotlin", "scala", "elixir"
+        "flutter", "dart", "salesforce", "swift", "kotlin", "scala", "elixir",
+        "react native", "redux", "vite", "supabase", "firebase", "postman", "prisma"
     }
 
     def score_job(
@@ -52,7 +53,9 @@ class MatchScorer:
         job_title: str,
         jd_text: str,
         profile: ResumeProfile,
-        min_threshold: int = 60
+        min_threshold: int = 60,
+        excluded_keywords: Optional[List[str]] = None,
+        max_experience_gap: Optional[float] = None
     ) -> MatchResult:
         if not jd_text or not profile:
             # Empty input edge cases
@@ -118,6 +121,23 @@ class MatchScorer:
             # Fallback 2: No experience specified -> neutral full 10 points
             exp_pts = 10.0
 
+        # Disqualification checks
+        disqualification_notes = []
+        is_hard_disqualified = False
+        if excluded_keywords:
+            text_to_check = f"{job_title.lower()} {jd_text.lower()}"
+            for kw in excluded_keywords:
+                if kw and re.search(rf"\b{re.escape(kw.lower())}\b", text_to_check):
+                    is_hard_disqualified = True
+                    disqualification_notes.append(f"Excluded keyword '{kw}' detected in job posting.")
+
+        if max_experience_gap is not None and jd_min_exp is not None:
+            if (jd_min_exp - candidate_exp) > max_experience_gap:
+                is_hard_disqualified = True
+                disqualification_notes.append(
+                    f"Experience requirement ({jd_min_exp} yrs) exceeds candidate's experience ({candidate_exp} yrs) by more than allowed gap ({max_experience_gap} yrs)."
+                )
+
         # 4. Handle Fallback 3: Zero identifiable skills in JD
         if not required_skills and not preferred_skills:
             score = int(round(70.0 * title_ratio + exp_pts))
@@ -127,13 +147,14 @@ class MatchScorer:
                 f"Title relevance: {int(round(title_ratio * 100))}% ({title_pts:.1f} pts)",
                 f"Experience alignment: {exp_pts:.1f} pts"
             ]
+            reasons.extend(disqualification_notes)
             return MatchResult(
                 score=score,
                 matched_skills=[],
                 missing_required=[],
                 matched_preferred=[],
                 reasons=reasons,
-                is_eligible=(score >= min_threshold),
+                is_eligible=(score >= min_threshold and not is_hard_disqualified),
                 is_low_confidence_parse=True
             )
 
@@ -175,6 +196,7 @@ class MatchScorer:
         ]
         if has_preferred_section:
             reasons.append(f"Preferred skills matched: {len(matched_pref)}/{len(preferred_skills)}")
+        reasons.extend(disqualification_notes)
 
         return MatchResult(
             score=total_score,
@@ -182,9 +204,43 @@ class MatchScorer:
             missing_required=missing_req,
             matched_preferred=matched_pref,
             reasons=reasons,
-            is_eligible=(total_score >= min_threshold),
+            is_eligible=(total_score >= min_threshold and not is_hard_disqualified),
             is_low_confidence_parse=False
         )
+
+    def score_jobs_batch(
+        self,
+        jobs: List[Any],
+        profile: ResumeProfile,
+        min_threshold: int = 60,
+        excluded_keywords: Optional[List[str]] = None,
+        max_experience_gap: Optional[float] = None
+    ) -> List[MatchResult]:
+        """Score a collection of jobs in batch against the candidate profile."""
+        results: List[MatchResult] = []
+        for item in jobs:
+            title = ""
+            jd = ""
+            if isinstance(item, tuple) and len(item) >= 2:
+                title, jd = item[0], item[1]
+            elif hasattr(item, "title") and hasattr(item, "description"):
+                title = item.title
+                jd = item.description or ""
+            elif isinstance(item, dict):
+                title = item.get("title") or item.get("job_title") or ""
+                jd = item.get("description") or item.get("jd_text") or ""
+            
+            res = self.score_job(
+                job_title=title,
+                jd_text=jd,
+                profile=profile,
+                min_threshold=min_threshold,
+                excluded_keywords=excluded_keywords,
+                max_experience_gap=max_experience_gap
+            )
+            results.append(res)
+        return results
+
 
     def _normalize_skill(self, skill: str) -> str:
         s = skill.strip().lower()
@@ -198,6 +254,8 @@ class MatchScorer:
             "reactjs": "react",
             "node.js": "node",
             "nodejs": "node",
+            "express.js": "express",
+            "expressjs": "express",
             "next.js": "nextjs",
             "nextjs": "nextjs",
             "vue.js": "vue",
@@ -205,6 +263,18 @@ class MatchScorer:
             "angular.js": "angular",
             "angularjs": "angular",
             "spring boot": "springboot",
+            "html5": "html",
+            "css3": "css",
+            "tailwind css": "tailwind",
+            "tailwindcss": "tailwind",
+            "rest api": "rest",
+            "rest apis": "rest",
+            "restful": "rest",
+            "restful api": "rest",
+            "restful apis": "rest",
+            "redux toolkit": "redux",
+            "postgres": "postgresql",
+            "mongo": "mongodb",
         }
         for k, v in replacements.items():
             if s == k:

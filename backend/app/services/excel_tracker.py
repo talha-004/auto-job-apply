@@ -252,6 +252,12 @@ class ExcelTracker(BaseStorageRepository):
         if fp and fp in self._processed_fingerprints:
             return (True, "POSSIBLE_DUPLICATE", self._processed_fingerprints[fp])
 
+        # Fallback: check without location in case the stored entry was recorded without location
+        if location:
+            fp_no_loc = compute_job_fingerprint(company, effective_title, None)
+            if fp_no_loc and fp_no_loc in self._processed_fingerprints:
+                return (True, "POSSIBLE_DUPLICATE", self._processed_fingerprints[fp_no_loc])
+
         return (False, None, None)
 
     def log_application(self, record: JobApplicationRecord) -> bool:
