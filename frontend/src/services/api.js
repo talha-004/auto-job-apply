@@ -252,6 +252,39 @@ export const settingsAPI = {
   },
 };
 
+export const analyticsAPI = {
+  getFunnel: async () => {
+    const response = await apiClient.get('/analytics/funnel');
+    return response.data;
+  },
+  getPlatformROI: async () => {
+    const response = await apiClient.get('/analytics/platform-roi');
+    return response.data;
+  },
+  getSummary: async () => {
+    const response = await apiClient.get('/analytics/summary');
+    return response.data;
+  },
+};
+
+export const followupAPI = {
+  getPending: async (minDays = 5) => {
+    const response = await apiClient.get(`/outreach/followups/pending?min_days=${minDays}`);
+    return response.data;
+  },
+  approve: async (applicationId) => {
+    const response = await apiClient.post(`/outreach/followups/${applicationId}/approve`);
+    return response.data;
+  },
+};
+
+export const mobileAPI = {
+  getStatus: async () => {
+    const response = await apiClient.get('/mobile/status');
+    return response.data;
+  },
+};
+
 export function createLogWebSocket(onMessage, onError) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;

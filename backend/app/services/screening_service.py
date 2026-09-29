@@ -183,11 +183,16 @@ class ScreeningService:
             education_summary.append(f"{edu.degree} in {edu.field} from {edu.institution}")
         edu_str = "; ".join(education_summary) if education_summary else "Relevant degree"
 
+        from app.core.prompt_guard import prompt_guard
+
+        sanitized_question = prompt_guard.sanitize_untrusted_text(question)
+        wrapped_question = prompt_guard.wrap_untrusted_context("screening_question", sanitized_question)
+
         job_info = ""
         if request.job_context:
-            title = request.job_context.get("title", "")
-            comp = request.job_context.get("company", "")
-            job_info = f"Job Title: {title}\nCompany: {comp}\n"
+            title = prompt_guard.sanitize_untrusted_text(request.job_context.get("title", ""))
+            comp = prompt_guard.sanitize_untrusted_text(request.job_context.get("company", ""))
+            job_info = prompt_guard.wrap_untrusted_context("job_context", f"Title: {title}\nCompany: {comp}") + "\n"
 
         prompt = f"""
 You are an expert, professional job applicant answering an employer screening question.
@@ -201,8 +206,7 @@ CANDIDATE VERIFIED DATA (GROUND TRUTH):
 - Education: {edu_str}
 - Summary: {profile.summary}
 
-SCREENING QUESTION:
-"{question}"
+{wrapped_question}
 
 INSTRUCTIONS:
 1. Strict Zero-Fabrication: Ground your answer ONLY in the candidate's verified data above.
@@ -222,17 +226,27 @@ Return JSON:
         # If LLM gave an answer, align if options exist
         if raw_answer:
             if options:
-                aligned = qa_vault_service._align_with_options(raw_answer, options)
+                raw_answer = qa_vault_service._align_with_options(raw_answer, options)
+            
+            # Fact & Claim Verification Boundary
+            from app.services.fact_ledger import FactLedgerService
+            from app.services.claim_verifier import ClaimVerifier
+            ledger = FactLedgerService().build_from_profile(profile)
+            verifier = ClaimVerifier(ledger)
+            verification = verifier.verify_answer(question, raw_answer)
+            
+            if not verification.is_valid:
                 return ScreeningQuestionAnswer(
                     question=question,
-                    answer=aligned,
+                    answer=verification.suggested_answer or raw_answer,
                     provenance=AnswerProvenance.DERIVED,
-                    confidence=0.85,
-                    requires_human_intervention=False,
-                    reason=res.get("reason") or "Synthesized via LLM grounded in candidate work history.",
+                    confidence=verification.confidence,
+                    requires_human_intervention=verification.requires_human_review,
+                    reason=f"Claim Verification: {verification.reason}",
                     matched_key=None,
                     options=options
                 )
+
             return ScreeningQuestionAnswer(
                 question=question,
                 answer=raw_answer,

@@ -130,3 +130,36 @@ async def decline_outreach_message(outreach_id: str):
     email_outreach_service._save_outreach(msg)
     return {"success": True, "message": "Outreach message declined."}
 
+
+@router.get("/followups/pending")
+async def get_pending_followups(min_days: int = 5):
+    """
+    Scan persistent applications for eligible 5-day post-submission follow-ups.
+    """
+    from app.services.followup_service import followup_service
+    pending = followup_service.scan_for_pending_followups(min_days_elapsed=min_days)
+    return {"pending_count": len(pending), "followups": pending}
+
+
+@router.post("/followups/{application_id}/approve")
+async def approve_followup(application_id: str):
+    """
+    Approve a polite follow-up email draft for sending.
+    """
+    from app.services.followup_service import followup_service
+    success = followup_service.approve_followup(application_id)
+    if not success:
+        raise HTTPException(status_code=429, detail="Daily follow-up cap reached (10/day).")
+    return {"success": True, "message": f"Follow-up for {application_id} approved."}
+
+
+@router.get("/leads/{company}")
+async def discover_company_leads(company: str, role: str = "Software Engineer"):
+    """
+    Discover candidate recruiter and hiring manager leads for a target company.
+    """
+    from app.services.recruiter_discovery import recruiter_discovery
+    leads = recruiter_discovery.discover_leads_for_company(company=company, target_role=role)
+    return {"company": company, "lead_count": len(leads), "leads": leads}
+
+

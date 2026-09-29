@@ -1,282 +1,153 @@
 # 🤖 AutoApplyJobs — Autonomous AI Job Application System 🚀
 
-> **Production-ready, autonomous job application bot powered by local LLMs (Ollama + `qwen2.5-coder`), Playwright stealth browser automation, FastAPI, and a real-time React dashboard.**
->
-> 100% Free & Open Source • Runs locally on your machine • No expensive third-party API keys required.
+> **An automated assistant that finds and applies to jobs for you on LinkedIn, Naukri, and Indeed — powered by local AI running right on your laptop.**
+> 
+> 100% Free & Private • Runs on your machine • No expensive monthly subscriptions.
 
 ---
 
-## 🌟 Key Features
+## 💡 What is AutoApplyJobs in Simple Words?
 
-- **🧠 100% Local & Free AI Intelligence**: Uses [Ollama](https://ollama.com/) with `qwen2.5-coder:7b-instruct-q4_K_M` to parse resumes, map arbitrary form fields, and intelligently answer portal screening questions.
-- **💼 Multi-Platform Automation**:
-  - **Naukri**: Quick Apply automation, chatbot questionnaire handler, and session persistence.
-  - **LinkedIn**: Easy Apply automation with multi-step wizard traversal and screening responses.
-  - **Indeed**: Indeed Apply automation and modal handling.
-  - **Dindin & Direct Portals**: Universal form auto-fill for custom job boards.
-- **🛡️ Stealth & Anti-Detection**:
-  - Randomized typing jitter (`30-80ms`) and human-like scrolling.
-  - Randomized viewports, realistic User-Agents (`Chrome 123`, `Firefox 124`), and evasion scripts removing `navigator.webdriver`.
-  - Session cookie caching to avoid frequent re-logins.
-- **🔐 Human-in-the-Loop (HITL)**:
-  - Detects OTP challenges, CAPTCHAs (Cloudflare / reCAPTCHA / Arkose), and 2FA prompts.
-  - Automatically pauses execution and alerts the dashboard via real-time WebSockets so you can solve the challenge and click **Resume**.
-- **📊 Excel Application Tracker (`job_applications.xlsx`)**:
-  - Automatically records timestamp, platform, job title, company, URL, status, and notes.
-  - Built-in deduplication ensures you never apply to the same job URL twice.
-- **⚡ Real-Time React Dashboard**:
-  - Live terminal logs via WebSocket (`/ws/logs`).
-  - Drag-and-drop resume upload (`.pdf` / `.docx`) with instant JSON profile inspection and editing.
-  - Bot control panel: Start, Pause, Resume, Stop.
-  - Headless mode toggle & Dry-run mode for safe testing.
-  - Searchable application history with one-click Excel download.
+Think of **AutoApplyJobs** as your personal job-search assistant:
+1. It opens job websites (LinkedIn, Naukri, Indeed) just like a human does.
+2. It searches for positions matching your job title and preferred location.
+3. It reads each job posting, checks your resume, and fills in questions (like years of experience, notice period, and skills).
+4. It submits the application and tracks everything automatically in a neat Excel spreadsheet and web dashboard.
 
 ---
 
-## 🛠️ Architecture & Project Structure
+## 💻 Your PC Hardware & Recommended AI Model
 
-```
-AutoApplyJobs/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── endpoints/
-│   │   │   │   ├── bot.py           # Bot start, stop, pause, resume, status
-│   │   │   │   ├── jobs.py          # Job history, stats, export Excel
-│   │   │   │   ├── resume.py        # PDF/DOCX upload, LLM parsing, profile edit
-│   │   │   │   └── settings.py      # Health checks & platform credential status
-│   │   │   └── api.py               # Combined API router
-│   │   ├── core/
-│   │   │   ├── config.py            # Pydantic settings & .env loader
-│   │   │   ├── llm.py               # Ollama client & prompt templates
-│   │   │   └── logger.py            # Thread-safe WebSocket broadcaster
-│   │   ├── models/
-│   │   │   ├── db_models.py         # SQLAlchemy models (SQLite/PostgreSQL)
-│   │   │   └── job.py               # Pydantic schemas (Resume, JobRecord, etc.)
-│   │   ├── platforms/
-│   │   │   ├── base.py              # BasePlatform (Playwright, stealth, form scanning)
-│   │   │   ├── linkedin.py          # LinkedIn Easy Apply bot
-│   │   │   ├── naukri.py            # Naukri Quick Apply bot
-│   │   │   ├── indeed.py            # Indeed Apply bot
-│   │   │   └── dindin.py            # Custom platform bot
-│   │   ├── services/
-│   │   │   ├── bot_manager.py       # Thread-isolated async state machine
-│   │   │   ├── excel_tracker.py     # openpyxl tracker & deduplication
-│   │   │   └── resume_parser.py     # pypdf/docx extraction + LLM parser
-│   │   └── main.py                  # FastAPI server & WebSocket endpoint
-│   ├── data/                        # Excel sheet, cookies, candidate profiles
-│   ├── requirements.txt             # Python dependencies
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── BotControlPanel.jsx      # Configuration, platforms & start/stop
-│   │   │   ├── JobApplicationsTable.jsx # Applications table & Excel export
-│   │   │   ├── LiveLogFeed.jsx          # Real-time WebSocket terminal
-│   │   │   ├── Navbar.jsx               # Header, Ollama indicator, status badge
-│   │   │   ├── ResumeUploader.jsx       # Resume upload & structured editor
-│   │   │   └── StatusIndicator.jsx      # Progress counters & CAPTCHA alert
-│   │   ├── context/
-│   │   │   └── BotContext.jsx           # Central state & WebSocket sync
-│   │   ├── services/
-│   │   │   └── api.js                   # Axios client & WebSocket helpers
-│   │   ├── App.jsx
-│   │   ├── index.css
-│   │   └── main.jsx
-│   ├── package.json
-│   ├── vite.config.js
-│   └── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── start_backend.bat
-├── start_frontend.bat
-└── README.md
-```
+We analyzed your laptop hardware specifications:
+- **Processor (CPU)**: 13th Gen Intel Core i7-13620H (10 Cores, 16 Threads)
+- **RAM**: 16 GB DDR5/DDR4
+- **Graphics Card (GPU)**: NVIDIA GeForce RTX 4050 Laptop GPU (**6 GB GDDR6 VRAM**)
+- **Operating System**: Windows 11
+
+### 🏆 Which Model is Best for Your PC?
+
+| Model | Size | VRAM Usage | Speed on RTX 4050 | Why it is the best match |
+|---|---|---|---|---|
+| **`qwen2.5-coder:7b`** *(Recommended)* | **4.7 GB** | **~5.1 GB** | **35–50 tokens/sec** | **Fits 100% inside your 6 GB RTX 4050 VRAM.** Best accuracy for filling forms, parsing resumes, and outputting clean answers. *(Already installed on your machine!)* |
+| **`qwen2.5-coder:3b`** *(Ultra-Light)* | 1.9 GB | ~2.3 GB | 70–90 tokens/sec | Uses minimal memory. Ideal if you are playing games or doing heavy video editing at the same time. |
+| **Cloud Gemini 1.5 Flash** *(Zero-VRAM)* | Cloud API | 0 MB | Instant | Uses Google's free API key. Zero battery or memory usage on your laptop. |
 
 ---
 
-## ⚡ Quick Start Guide
+## ⚡ How to Run Everything (Simple 3-Step Guide)
 
-### 1. Prerequisites
-
-Before getting started, make sure you have installed:
-- **Python 3.10+** (with `pip`)
-- **Node.js 18+ & npm**
-- **[Ollama](https://ollama.com/)** (for local LLM capabilities)
-
----
-
-### 2. Set Up the Local LLM (Ollama)
-
-1. Download and install Ollama from [ollama.com](https://ollama.com).
-2. Pull and start the recommended model:
-   ```bash
-   ollama run qwen2.5-coder:7b-instruct-q4_K_M
-   ```
-   *(Or the standard 7b model: `ollama run qwen2.5-coder:7b`)*
-3. Keep Ollama running in the background. It will serve on `http://localhost:11434`.
-
----
-
-### 3. Configure Environment Variables
-
-1. Copy `.env.example` to create `.env` in the project root:
-   ```bash
-   cp .env.example .env
-   ```
-2. Open `.env` and fill in your platform credentials:
-   ```env
-   # Ollama LLM Settings
-   OLLAMA_BASE_URL=http://localhost:11434
-   OLLAMA_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
-
-   # Platform Credentials
-   LINKEDIN_EMAIL=your_linkedin_email@example.com
-   LINKEDIN_PASSWORD=your_linkedin_password
-
-   NAUKRI_EMAIL=your_naukri_email@example.com
-   NAUKRI_PASSWORD=your_naukri_password
-
-   INDEED_EMAIL=your_indeed_email@example.com
-   INDEED_PASSWORD=your_indeed_password
-
-   # Safety & Speed Settings
-   DEFAULT_MAX_APPLICATIONS=25
-   MIN_DELAY_SECONDS=2.0
-   MAX_DELAY_SECONDS=5.0
-   COOLDOWN_BETWEEN_JOBS_SECONDS=15.0
-   HEADLESS=False
-   DRY_RUN=False
-   ```
-
----
-
-### 4. 🚀 Single-Command Launcher (Starts All Services)
-
-You can launch **all services (FastAPI Backend, React Frontend, and AI / Ollama)** using a single command:
-
-#### Option A: Cross-Platform Python (Recommended)
+### Step 1: Start Your AI Model
+Open a terminal (PowerShell or Command Prompt) and run:
 ```bash
-python start_all.py
-# or
-npm start
+ollama run qwen2.5-coder:7b
 ```
+> Keep this window open. This provides the local AI brain on `http://localhost:11434`.
 
-#### Option B: Windows Batch (Opens dedicated windows)
+---
+
+### Step 2: Start the System (One Single Command)
+
+In your project folder (`AutoApplyJobs`), run:
+
+#### Option A: One-Click File (Easiest for Windows)
+Simply double-click:
 ```cmd
 start_all.bat
 ```
 
-#### Option C: Windows PowerShell
-```powershell
-.\start_all.ps1
+#### Option B: From Terminal
+```bash
+python start_all.py
 ```
 
-This automatically:
-- Checks & starts local **Ollama** (or verifies Cloud Gemini in `.env`)
-- Activates the Python virtual environment and starts **FastAPI** on `http://localhost:8000`
-- Starts the React Vite Dashboard on `http://localhost:5173`
-- Gracefully shuts down all services on `Ctrl+C`
+This single command will:
+- Check that your AI model is ready.
+- Start the Backend server on `http://localhost:8000`.
+- Start the Web Dashboard on `http://localhost:5173`.
 
 ---
 
-### 5. Manual Setup & Individual Service Commands
+### Step 3: Open the Dashboard in Your Browser
 
-#### In Windows Terminal / Git Bash:
+Open your browser and navigate to:
+👉 **[http://localhost:5173](http://localhost:5173)**
+
+---
+
+## 🖥️ How to Use the Dashboard (Beginner-Friendly)
+
+1. **Upload Your Resume**:
+   - Go to the **Candidate Resume** tab.
+   - Drag and drop your `.pdf` or `.docx` resume.
+   - The local AI will automatically extract your contact details, skills, and work history.
+2. **Configure Your Application Settings**:
+   - **Job Title / Keywords**: e.g., `Full Stack Developer`, `Python Developer`, `Data Analyst`.
+   - **Location**: e.g., `Remote`, `Bangalore`, `New York`, `London`.
+   - **Platforms**: Check the boxes for **LinkedIn**, **Naukri**, or **Indeed**.
+3. **Fill the Q&A Vault (Optional but Recommended)**:
+   - Add default answers for frequent questions (e.g., Notice Period = `30 days`, Expected Salary = `$90,000`, Authorized to work = `Yes`).
+4. **Click "Start Auto-Apply Bot"**:
+   - The browser will open and begin searching and applying.
+   - Watch the live log screen on the dashboard to see progress in real time.
+   - Your applied jobs are automatically saved to `job_applications.xlsx`.
+
+---
+
+## 🛡️ Anti-Ban & Safe Usage Tips
+
+- **First Run (Keep Headless Disabled)**: On your first run, leave "Headless Mode" unchecked. If LinkedIn or Naukri asks you to log in with an OTP or solve a CAPTCHA, simply do it in the open browser. The bot will save your login cookies so you won't need to log in again.
+- **Natural Human Delays**: The bot automatically pauses between actions and uses randomized human typing speeds to prevent bot detection.
+- **Recommended Daily Limit**: Start with **20 to 30 applications per day** to keep your accounts healthy and trusted.
+
+---
+
+## 🚀 Advanced Features Included (V2)
+
+- **🎯 ATS Keyword Gap Scorecard**: Scores your resume against every job posting and shows matching vs. missing keywords.
+- **📄 Multi-Template Resumes**: Generates clean, tailored PDF resumes matching specific job descriptions.
+- **🤝 Recruiter Lead Discovery & Follow-Up**: Finds the hiring manager or recruiter name and drafts polite follow-up messages.
+- **📱 Mobile Companion (Telegram Bot)**: Get instant phone notifications when an application succeeds or when a CAPTCHA needs your attention.
+- **📊 Conversion Funnel Analytics**: Visualizes how many jobs were found, applied to, screened, and interviewed.
+
+---
+
+## ❓ Frequently Asked Questions & Troubleshooting
+
+#### 1. What if it says "Ollama not running"?
+Make sure you ran `ollama run qwen2.5-coder:7b` in a terminal window first, or start the Ollama desktop app.
+
+#### 2. Can I use this while working on my PC?
+Yes! The `qwen2.5-coder:7b` model takes about ~5 GB of your 6 GB RTX 4050 GPU, leaving your 10-core CPU and 16 GB of system RAM completely smooth and responsive.
+
+#### 3. How do I stop the automation?
+Click the **"Stop Bot"** button on the dashboard at `http://localhost:5173`, or press `Ctrl + C` in the terminal running `start_all.py`.
+
+#### 4. Where are my applied jobs saved?
+All successful applications are exported directly to `backend/data/job_applications.xlsx` and can be downloaded anytime via the "Export Excel" button on the dashboard.
+
+---
+
+## 🛠️ Developer Manual Setup (Optional)
+
+If you prefer starting backend and frontend separately:
+
+### Backend
 ```bash
-# 1. Navigate to the backend directory
 cd backend
-
-# 2. Create and activate a Python virtual environment
-python -m venv venv
-
-# On Windows (Git Bash):
-source venv/Scripts/activate
-# On Windows (CMD / PowerShell):
 .\venv\Scripts\activate
-# On Linux / macOS:
-source venv/bin/activate
-
-# 3. Install Python dependencies
 pip install -r requirements.txt
-
-# 4. Install Playwright Chromium browser binary
 playwright install chromium
-
-# 5. Start the FastAPI Uvicorn server
 uvicorn app.main:app --reload --port 8000
 ```
-Backend API will be live at `http://localhost:8000` (Interactive Swagger docs: `http://localhost:8000/docs`).
 
----
-
-### 5. Frontend Setup & Run
-
-Open a new terminal:
+### Frontend
 ```bash
-# 1. Navigate to frontend directory
 cd frontend
-
-# 2. Install Node.js packages
 npm install
-
-# 3. Start Vite development server
 npm run dev
 ```
-Frontend Dashboard will be live at `http://localhost:5173`.
-
----
-
-## 🚀 One-Click Windows Launchers
-
-On Windows, you can also launch both services with the provided batch scripts:
-- Double-click **`start_backend.bat`**
-- Double-click **`start_frontend.bat`**
-
----
-
-## 🎯 How to Use the System
-
-1. Open **`http://localhost:5173`** in your browser.
-2. **Upload Your Resume**:
-   - Go to the **Candidate Resume** section.
-   - Upload your `.pdf` or `.docx` resume.
-   - The local Ollama LLM will automatically parse your contact info, experience timeline, skills, and screening answers into structured JSON.
-   - You can review and edit any parsed field directly in the dashboard.
-3. **Configure the Bot**:
-   - **Target Platforms**: Check the platforms you want to apply on (e.g., Naukri, LinkedIn, Indeed).
-   - **Keywords**: e.g., `Full Stack Developer`, `React Developer`, `Python Engineer`.
-   - **Location**: e.g., `Remote`, `Bangalore`, `Hyderabad`, `Pune`, `New York`.
-   - **Headless Mode**: Leave **unchecked** for your first run so you can observe the browser and enter any OTP/SMS codes if prompted.
-   - **Dry Run Mode**: (Optional) Enable this to test form scanning and traversal without clicking the final submit button.
-4. **Click "Start Auto-Apply Bot"**:
-   - Watch the visible browser open, search, and apply to matching roles.
-   - Monitor the **Live Activity Feed** on the dashboard for real-time progress and logs.
-   - Download `job_applications.xlsx` anytime to review your application records.
-
----
-
-## 🛡️ Anti-Detection & Safety Best Practices
-
-1. **First-Run Interactive Login**: Keep **Headless Mode disabled** on your first run. If a platform asks for an OTP or security check, enter it in the open browser. The bot will save the session cookies in `backend/data/cookies/` and reuse them on future runs.
-2. **Cooldowns & Pacing**: Keep the cooldown between applications set to at least **15-30 seconds** to mimic human behavior.
-3. **Daily Application Limits**: Target **25-40 applications per day** to stay well within platform rate limits and prevent account restrictions.
-4. **Dry-Run Testing**: Always test a new keyword search with **Dry Run Mode** enabled first to ensure the bot targets the right listings.
-
----
-
-## 🐳 Docker Deployment (Optional)
-
-To spin up the entire stack using Docker Compose:
-
-```bash
-docker-compose up --build
-```
-- Frontend Dashboard: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
 
 ---
 
 ## 📄 License
-
-MIT License • Free and Open Source. Created for educational and personal career automation purposes.
+MIT License • Free and Open Source.

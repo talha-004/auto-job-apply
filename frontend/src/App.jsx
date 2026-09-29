@@ -9,6 +9,7 @@ import { JobApplicationsTable } from './components/JobApplicationsTable';
 import { InterventionCenter } from './components/InterventionCenter';
 import { QAVaultEditor } from './components/QAVaultEditor';
 import { SchedulerSettings } from './components/SchedulerSettings';
+import { ConversionFunnel } from './components/ConversionFunnel';
 import { jobsAPI, outreachAPI } from './services/api';
 
 function DashboardContent() {
@@ -80,6 +81,13 @@ function DashboardContent() {
             {/* Bottom Full-Width Job Applications Table */}
             <JobApplicationsTable />
           </>
+        )}
+
+        {activeTab === 'analytics' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <ConversionFunnel />
+            <JobApplicationsTable />
+          </div>
         )}
 
         {activeTab === 'interventions' && (

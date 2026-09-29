@@ -31,6 +31,7 @@ from app.models.job import (
 from app.services.excel_tracker import excel_tracker
 from app.platforms.naukri_helpers import normalize_token
 from app.platforms.adapter_interface import ApplicationAdapter, AdapterApplicationResult
+from app.platforms.stealth_driver import HumanBiometricsDriver, PlatformCoolDownException, stealth_driver
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -106,6 +107,24 @@ class BasePlatform(ApplicationAdapter, ABC):
         self.is_persistent_context: bool = False
         self.run_id: str = getattr(config, "run_id", None) or f"RUN-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         self.attempt_counters: Dict[str, int] = {}
+        self.stealth_driver = HumanBiometricsDriver()
+
+    async def human_type(self, selector_or_element, text: str, typo_chance: float = 0.03):
+        """Type with organic human cadence and realistic typo simulation."""
+        if not self.page:
+            raise RuntimeError("Browser page not initialized.")
+        await self.stealth_driver.human_type(self.page, selector_or_element, text, typo_chance=typo_chance)
+
+    async def human_click(self, target, click_type: str = "left"):
+        """Move cursor with cubic Bezier curve, pause, and click."""
+        if not self.page:
+            raise RuntimeError("Browser page not initialized.")
+        await self.stealth_driver.human_click(self.page, target, click_type=click_type)
+
+    async def check_challenge_cooldown(self):
+        """Detect anti-bot and rate-limiting triggers, raising PlatformCoolDownException if detected."""
+        if self.page:
+            await self.stealth_driver.detect_and_handle_challenges(self.page, platform=self.platform_name.value)
 
     async def init_browser(self) -> Page:
         """Launch stealth Playwright browser with persistent context or saved cookies."""

@@ -97,16 +97,25 @@ class PersistenceService:
             logger.info(f"[Persistence] Successfully seeded {seeded} records to PostgreSQL.")
 
     def save_or_update_application(self, record: JobApplicationRecord) -> Optional[DBJobApplication]:
-        """Upsert application record into PostgreSQL and sync Excel export."""
-        from app.services.excel_tracker import excel_tracker
+        from app.services.job_fingerprinter import job_fingerprinter
+        from app.services.excel_outbox import excel_outbox
 
-        # 1. Update Excel Tracker memory and workbook
-        excel_tracker.log_application(record)
+        # Normalize canonical URL to avoid query parameter duplicates
+        canonical_url = job_fingerprinter.normalize_url(record.job_url) if record.job_url else ""
+        if canonical_url:
+            record.job_url = canonical_url
 
-        # 2. Upsert in PostgreSQL
+        # 1. Enqueue in Excel Outbox for resilient background projection
+        excel_outbox.enqueue(record)
+        excel_outbox.flush_sync()
+
+        # 2. Authoritative Upsert in Database
         try:
             with SessionLocal() as db:
-                existing = db.query(DBJobApplication).filter(DBJobApplication.job_url == record.job_url).first()
+                existing = db.query(DBJobApplication).filter(
+                    (DBJobApplication.job_url == record.job_url) |
+                    (DBJobApplication.job_url == canonical_url)
+                ).first()
 
                 dt = datetime.utcnow()
                 if record.timestamp:

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useBot } from '../context/BotContext';
-import { Bot, Cpu, Sparkles, ShieldCheck, AlertCircle, ShieldAlert, Database, Clock, LayoutDashboard } from 'lucide-react';
+import { Bot, Cpu, Sparkles, ShieldCheck, AlertCircle, ShieldAlert, Database, Clock, LayoutDashboard, TrendingUp } from 'lucide-react';
 
 export const Navbar = ({ activeTab = 'dashboard', onSelectTab, interventionCount = 0 }) => {
   const { systemHealth, status } = useBot();
@@ -10,6 +10,7 @@ export const Navbar = ({ activeTab = 'dashboard', onSelectTab, interventionCount
 
   const navItems = [
     { id: 'dashboard', label: 'Bot Dashboard', icon: LayoutDashboard },
+    { id: 'analytics', label: 'Funnel & Analytics', icon: TrendingUp },
     { id: 'interventions', label: 'Interventions', icon: ShieldAlert, badge: interventionCount },
     { id: 'vault', label: 'QA Vault', icon: Database },
     { id: 'scheduler', label: 'Scheduler', icon: Clock },

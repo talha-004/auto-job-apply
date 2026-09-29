@@ -18,10 +18,18 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
+from enum import Enum
 from app.core.config import settings
 from app.core.logger import logger
 from app.models.job import ResumeProfile, WorkExperience, Education
 from app.platforms.naukri_helpers import normalize_token
+from app.services.ats_scorer import ats_scorer, ATSScorecard
+
+
+class TemplateType(str, Enum):
+    CLASSIC_ATS = "classic_ats"
+    TECH_MINIMALIST = "tech_minimalist"
+    COMPACT_ONE_PAGE = "compact_one_page"
 
 
 class TailoredResumeResult(BaseModel):
@@ -32,6 +40,9 @@ class TailoredResumeResult(BaseModel):
     matched_skills_highlighted: List[str] = Field(default_factory=list)
     tailored_summary: str
     original_summary: str
+    template_used: str = "classic_ats"
+    ats_score: Optional[float] = None
+    ats_tier: Optional[str] = None
     generated_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
@@ -151,7 +162,8 @@ class ResumeTailorer:
         profile: ResumeProfile,
         job_title: str,
         jd_text: str,
-        job_id: Optional[str] = None
+        job_id: Optional[str] = None,
+        template: TemplateType = TemplateType.CLASSIC_ATS
     ) -> TailoredResumeResult:
         """
         Generate an ATS-formatted PDF resume tailored for the specific job description.
@@ -166,14 +178,34 @@ class ResumeTailorer:
         matched_skills, other_skills = self.identify_matching_skills(profile, jd_text, job_title)
         tailored_summary = self.tailor_summary(profile, job_title, matched_skills)
 
-        # 2. Build ReportLab Document
+        # 2. Template Styling & Color Configuration
+        if template == TemplateType.CLASSIC_ATS:
+            primary_col = colors.HexColor("#000000")
+            secondary_col = colors.HexColor("#222222")
+            hr_col = colors.HexColor("#444444")
+            margin = 36
+            spacer_mult = 1.0
+        elif template == TemplateType.COMPACT_ONE_PAGE:
+            primary_col = colors.HexColor("#1A202C")
+            secondary_col = colors.HexColor("#2D3748")
+            hr_col = colors.HexColor("#CBD5E0")
+            margin = 24
+            spacer_mult = 0.6
+        else:  # TECH_MINIMALIST
+            primary_col = self.PRIMARY_COLOR
+            secondary_col = self.SECONDARY_COLOR
+            hr_col = self.SECONDARY_COLOR
+            margin = 36
+            spacer_mult = 1.0
+
+        # 3. Build ReportLab Document
         doc = SimpleDocTemplate(
             str(pdf_path),
             pagesize=letter,
-            leftMargin=36,
-            rightMargin=36,
-            topMargin=36,
-            bottomMargin=36
+            leftMargin=margin,
+            rightMargin=margin,
+            topMargin=margin,
+            bottomMargin=margin
         )
 
         styles = getSampleStyleSheet()
@@ -183,9 +215,9 @@ class ResumeTailorer:
             "DocName",
             parent=styles["Normal"],
             fontName="Helvetica-Bold",
-            fontSize=18,
-            leading=22,
-            textColor=self.PRIMARY_COLOR,
+            fontSize=18 if template != TemplateType.COMPACT_ONE_PAGE else 16,
+            leading=22 if template != TemplateType.COMPACT_ONE_PAGE else 19,
+            textColor=primary_col,
             alignment=TA_CENTER
         )
         headline_style = ParagraphStyle(
@@ -194,7 +226,7 @@ class ResumeTailorer:
             fontName="Helvetica-Bold",
             fontSize=11,
             leading=14,
-            textColor=self.SECONDARY_COLOR,
+            textColor=secondary_col,
             alignment=TA_CENTER
         )
         contact_style = ParagraphStyle(
@@ -369,6 +401,9 @@ class ResumeTailorer:
         doc.build(story)
         file_size = os.path.getsize(pdf_path)
 
+        # 4. Evaluate ATS Scorecard
+        ats_card = ats_scorer.evaluate_resume_ats_match(profile, jd_text, tailored_summary)
+
         # Write metadata
         result = TailoredResumeResult(
             job_id=clean_job_id,
@@ -376,7 +411,10 @@ class ResumeTailorer:
             file_size_bytes=file_size,
             matched_skills_highlighted=matched_skills,
             tailored_summary=tailored_summary,
-            original_summary=profile.summary or ""
+            original_summary=profile.summary or "",
+            template_used=template.value,
+            ats_score=ats_card.overall_score,
+            ats_tier=ats_card.tier
         )
 
         metadata_path = target_dir / "tailoring_metadata.json"
