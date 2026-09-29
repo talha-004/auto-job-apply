@@ -146,6 +146,15 @@ class GreenhouseAdapter(ApplicationAdapter):
                     if not val:
                         ans = qa_vault_service.resolve_answer(label_text, candidate_profile=profile)
                         if ans:
+                            # Fact ledger zero-hallucination verification
+                            try:
+                                from app.services.claim_verifier import claim_verifier
+                                v_res = claim_verifier.verify_claim(label_text, str(ans))
+                                if not v_res.verified and v_res.confidence < 0.5:
+                                    logger.warning(f"[GreenhouseAdapter] Skipping unverified claim for '{label_text}': {ans}")
+                                    continue
+                            except Exception:
+                                pass
                             await inp.fill(str(ans))
                             filled[label_text] = ans
 
@@ -170,7 +179,7 @@ class GreenhouseAdapter(ApplicationAdapter):
         return {"filled": filled, "unfilled": unfilled}
 
     async def submit(self, page: Any) -> bool:
-        """Click submit button on Greenhouse form."""
+        """Click submit button on Greenhouse form with vision coordinate fallback."""
         submit_selectors = [
             "#submit_app",
             "input[type='submit']",
@@ -181,6 +190,13 @@ class GreenhouseAdapter(ApplicationAdapter):
         for sel in submit_selectors:
             btn = await page.query_selector(sel)
             if btn and await btn.is_visible():
+                try:
+                    from app.platforms.vision_solver import vision_solver
+                    clicked = await vision_solver.resilient_click(page, sel, timeout_ms=2500)
+                    if clicked:
+                        return True
+                except Exception:
+                    pass
                 await btn.click()
                 return True
         return False

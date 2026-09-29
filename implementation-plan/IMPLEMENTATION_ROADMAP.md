@@ -260,5 +260,53 @@ Every phase adheres to strict dependency ordering, comprehensive testing require
   - `PHASE-16-TASK-05`: Verify with test suite covering query expansion, boolean search, platform URLs, title filtering, and telemetry.
 - **Acceptance Criteria**: 254 passed backend tests, 0 build errors, multi-query expansion and title relevance gating fully operational.
 
+---
+
+## Phase 17: Multi-Corporate ATS Parity — Greenhouse & Lever (v3.3 Workday Parity)
+- **Objective**: Expand direct external ATS form automation to Greenhouse (`boards.greenhouse.io`) and Lever (`jobs.lever.co`) with zero drops on external redirects.
+- **Problems Solved**: Eliminates dropped application opportunities when job boards redirect candidates to standard corporate ATS platforms.
+- **Tasks**:
+  - `PHASE-17-TASK-01`: Connect `GreenhouseAdapter` with `ClaimVerifier` validation and `VisionCoordinateSolver` resilient click fallback.
+  - `PHASE-17-TASK-02`: Connect `LeverAdapter` with `ClaimVerifier` validation and `VisionCoordinateSolver` resilient click fallback.
+  - `PHASE-17-TASK-03`: Write unit tests for URL detection, form extraction, question answering, and submission confirmation.
+- **Acceptance Criteria**: 100% test pass on Greenhouse and Lever mock environments; zero unverified claim assertions submitted.
+
+---
+
+## Phase 18: Live Calendar Conflict Resolution & Workday-Safe Auto-Booking
+- **Objective**: Parse candidate local `.ics` exports or remote calendar subscription feeds to guarantee that recruiter interview RSVP suggestions never collide with 9-to-5 workday commitments.
+- **Problems Solved**: Eliminates double-booking and schedule clashes with candidate's daytime job responsibilities. Operates strictly read-only for complete privacy.
+- **Tasks**:
+  - `PHASE-18-TASK-01`: Implement `CalendarSyncService` parsing standard iCalendar RFC-5545 `.ics` feeds and extracting busy intervals.
+  - `PHASE-18-TASK-02`: Implement `get_conflict_free_slots()` to generate workday-safe interview slots that avoid candidate meetings.
+  - `PHASE-18-TASK-03`: Integrate `CalendarSyncService` into `EmailAutoResponderService.generate_rsvp_draft`.
+  - `PHASE-18-TASK-04`: Write test suite verifying `.ics` parsing, conflict detection, and dynamic slot substitution.
+- **Acceptance Criteria**: Candidate meetings are excluded from proposed interview times; candidate privacy strictly maintained.
+
+---
+
+## Phase 19: Automated Post-Apply Recruiter Outreach Pipeline
+- **Objective**: Automatically discover hiring team leads and draft tailored, polite LinkedIn connection notes or follow-up emails, dispatchable via 1-tap mobile Telegram buttons.
+- **Problems Solved**: Increases response rates by following up directly with recruiters immediately upon application submission; maintains human-in-the-loop control via mobile push.
+- **Tasks**:
+  - `PHASE-19-TASK-01`: Enhance `EmailOutreachService` with `OutreachChannel.LINKEDIN_MESSAGE` drafting adhering to 300-character invitation limits.
+  - `PHASE-19-TASK-02`: Implement `trigger_post_application_outreach` tying job submissions to lead discovery and automated drafting.
+  - `PHASE-19-TASK-03`: Add mobile Telegram callback handlers (`outreach_send_`, `outreach_view_`, `outreach_dismiss_`) and `/outreach` command.
+  - `PHASE-19-TASK-04`: Write test suite verifying post-apply lead discovery, note drafting, and 1-tap mobile actions.
+- **Acceptance Criteria**: Personalized connection note under 300 characters drafted and dispatched to candidate's mobile Telegram within seconds of job application.
+
+---
+
+## Phase 20: Silent 9-to-5 Windows Background Runner & Watchdog Daemon
+- **Objective**: Provide zero-taskbar background execution launcher and safety guard that strictly enforces natural business-hour operation (09:00 - 17:00).
+- **Problems Solved**: Allows candidate to work their 9-to-5 day job without open terminal windows or browser popups; guarantees automated applications only run during normal human working hours.
+- **Tasks**:
+  - `PHASE-20-TASK-01`: Implement `BusinessHourGuard` in `AutonomousSchedulerService` to pause applications during evenings and weekends.
+  - `PHASE-20-TASK-02`: Create `run_9to5_silent.vbs` for completely hidden background execution (0 console windows on screen).
+  - `PHASE-20-TASK-03`: Create `run_9to5_background.bat` with interactive diagnostic controls, environment validation, and background logging.
+  - `PHASE-20-TASK-04`: Write test suite verifying business hour check, weekend prevention, and dynamic scheduler configuration.
+- **Acceptance Criteria**: 268 passed backend tests, 0 frontend build errors, silent background execution operational.
+
+
 
 

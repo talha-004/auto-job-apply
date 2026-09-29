@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     SCHEDULER_MORNING_MINUTE: int = 0
     SCHEDULER_HEADLINE_REFRESH_HOURS: int = 6
     SCHEDULER_DAILY_CAP: int = 25
+    SCHEDULER_ENFORCE_BUSINESS_HOURS: bool = True
+    SCHEDULER_BUSINESS_START_HOUR: int = 9
+    SCHEDULER_BUSINESS_END_HOUR: int = 17
 
     # Optional Proxy Configuration (e.g., http://user:pass@proxy.example.com:8080)
     PROXY_URL: Optional[str] = None

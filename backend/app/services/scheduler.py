@@ -39,11 +39,32 @@ class ScheduledJobInfo(BaseModel):
     last_run_status: Optional[str] = None
 
 
+class BusinessHourGuard:
+    """
+    Enforces natural 9-to-5 business hour execution (Monday-Friday, 09:00 - 17:00).
+    Protects user accounts from unnatural off-hours or weekend bot activity.
+    """
+    def __init__(self, start_hour: int = 9, end_hour: int = 17, enforce_weekdays: bool = True):
+        self.start_hour = start_hour
+        self.end_hour = end_hour
+        self.enforce_weekdays = enforce_weekdays
+
+    def is_business_hour(self, target_time: Optional[datetime] = None) -> bool:
+        """Determines if the given time falls within active 9-to-5 business hours."""
+        now = target_time or datetime.now()
+        # Monday is 0 and Sunday is 6
+        if self.enforce_weekdays and now.weekday() >= 5:
+            return False
+        return self.start_hour <= now.hour < self.end_hour
+
+
 class SchedulerDailyStats(BaseModel):
     current_date: str
     applications_applied_today: int
     daily_cap: int
     cap_reached: bool
+    business_hours_active: bool = True
+    enforce_business_hours: bool = True
 
 
 class SchedulerStatusResponse(BaseModel):
@@ -59,6 +80,9 @@ class SchedulerConfigRequest(BaseModel):
     headline_refresh_enabled: Optional[bool] = None
     headline_refresh_interval_hours: Optional[int] = Field(default=None, ge=1, le=48)
     daily_application_cap: Optional[int] = Field(default=None, ge=1, le=200)
+    enforce_business_hours: Optional[bool] = None
+    business_start_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    business_end_hour: Optional[int] = Field(default=None, ge=0, le=23)
 
 
 class AutonomousSchedulerService:
@@ -76,6 +100,12 @@ class AutonomousSchedulerService:
         self.morning_hour = settings.SCHEDULER_MORNING_HOUR
         self.morning_minute = settings.SCHEDULER_MORNING_MINUTE
         self.refresh_hours = settings.SCHEDULER_HEADLINE_REFRESH_HOURS
+        self.enforce_business_hours = settings.SCHEDULER_ENFORCE_BUSINESS_HOURS
+        self.business_hour_guard = BusinessHourGuard(
+            start_hour=settings.SCHEDULER_BUSINESS_START_HOUR,
+            end_hour=settings.SCHEDULER_BUSINESS_END_HOUR,
+            enforce_weekdays=True
+        )
 
     def _get_scheduler(self) -> AsyncIOScheduler:
         """Lazy initializer for AsyncIOScheduler bound to active event loop."""
@@ -200,6 +230,17 @@ class AutonomousSchedulerService:
             logger.warning(f"[Scheduler] {msg}")
             await broadcaster.emit_log(f"⚠️ [Scheduler] {msg}", level=LogLevel.WARNING)
             self._record_run_result(job_id, now_str, "SKIPPED_CONCURRENCY_LOCK")
+            return
+
+        # Enforce 9-to-5 business hours safety guard
+        if self.enforce_business_hours and not self.business_hour_guard.is_business_hour():
+            msg = (
+                f"Outside of 9-to-5 business hours ({datetime.now().strftime('%A %H:%M')}). "
+                f"Application cycle safely paused until business hours ({self.business_hour_guard.start_hour:02d}:00 - {self.business_hour_guard.end_hour:02d}:00)."
+            )
+            logger.info(f"[Scheduler] {msg}")
+            await broadcaster.emit_log(f"⏸️ [Scheduler] {msg}", level=LogLevel.INFO)
+            self._record_run_result(job_id, now_str, "SKIPPED_OUTSIDE_BUSINESS_HOURS")
             return
 
         async with self._mutex_lock:
@@ -327,6 +368,14 @@ class AutonomousSchedulerService:
         if req.headline_refresh_enabled is not None:
             self.toggle_job("naukri_headline_refresh", req.headline_refresh_enabled)
 
+        # Update business hours enforcement
+        if req.enforce_business_hours is not None:
+            self.enforce_business_hours = req.enforce_business_hours
+        if req.business_start_hour is not None:
+            self.business_hour_guard.start_hour = req.business_start_hour
+        if req.business_end_hour is not None:
+            self.business_hour_guard.end_hour = req.business_end_hour
+
     def get_status(self) -> SchedulerStatusResponse:
         """Return comprehensive scheduler health and job status."""
         self._sync_daily_counter()
@@ -354,7 +403,9 @@ class AutonomousSchedulerService:
             current_date=self._last_stats_date,
             applications_applied_today=self._applied_today_count,
             daily_cap=self.daily_cap,
-            cap_reached=self.is_daily_cap_reached()
+            cap_reached=self.is_daily_cap_reached(),
+            business_hours_active=self.business_hour_guard.is_business_hour(),
+            enforce_business_hours=self.enforce_business_hours
         )
 
         return SchedulerStatusResponse(

@@ -77,11 +77,25 @@ class EmailAutoResponderService:
         resolved_role = role or "Software Engineer"
         candidate_name = getattr(settings, "CANDIDATE_NAME", "Syed Talha Ahmed")
 
-        suggested_slots = custom_slots or [
-            "Tomorrow between 2:00 PM – 4:00 PM EST",
-            "Wednesday between 10:00 AM – 1:00 PM EST",
-            "Thursday between 1:00 PM – 4:00 PM EST"
-        ]
+        if custom_slots:
+            suggested_slots = custom_slots
+        else:
+            try:
+                from app.services.calendar_sync import calendar_sync
+                if calendar_sync.events:
+                    suggested_slots = calendar_sync.get_conflict_free_slots()
+                else:
+                    suggested_slots = [
+                        "Tomorrow between 2:00 PM – 5:00 PM EST",
+                        "The following day between 10:00 AM – 1:00 PM EST",
+                        "Any weekday afternoon that aligns with your schedule"
+                    ]
+            except Exception:
+                suggested_slots = [
+                    "Tomorrow between 2:00 PM – 5:00 PM EST",
+                    "The following day between 10:00 AM – 1:00 PM EST",
+                    "Any weekday afternoon that aligns with your schedule"
+                ]
 
         if tone == "concise":
             if action_link:

@@ -229,6 +229,27 @@ Replaces the coarse 5-state machine with resilient, verifiable steps:
 - **Title Relevance & Negative Keyword Gating**: High-speed pre-filter that eliminates non-relevant roles (e.g. `Intern`, `Director`, `Unpaid`, or zero semantic overlap) before expensive DOM scraping and LLM evaluation.
 - **Search Yield Telemetry**: Tracks scraping yield percentage, duplicate discard rate, and filter statistics per search execution.
 
+### 4.3 v3.3 Autonomous 9-to-5 Background Innovations
+
+#### L. Multi-Corporate ATS Parity (Greenhouse & Lever)
+- Direct automation parity for `boards.greenhouse.io` and `jobs.lever.co`.
+- `GreenhouseAdapter` and `LeverAdapter` enforce `ClaimVerifier` validation across custom application questions and fall back to `VisionCoordinateSolver` for stubborn embedded inputs or obscured submission buttons.
+
+#### M. Live Calendar Conflict Resolution & Workday Protection
+- `CalendarSyncService` parses standard iCalendar RFC-5545 (`.ics`) exports and remote private subscription URLs.
+- Operates strictly read-only: never uploads event titles or details.
+- Computes `get_conflict_free_slots()` to ensure that interview invitations negotiated by `EmailAutoResponderService` only offer time windows that never collide with the candidate's existing 9-to-5 workday commitments.
+
+#### N. Automated Post-Apply Recruiter Outreach Pipeline
+- Immediately upon submission, `EmailOutreachService.trigger_post_application_outreach()` discovers hiring team leads.
+- Automatically synthesizes tailored, polite LinkedIn connection notes (adhering to the 300-character limit) or cold follow-up emails.
+- Dispatches instant alerts to the candidate's mobile Telegram with 1-tap `[📨 Approve & Send]`, `[👀 View Note]`, and `[❌ Dismiss]` inline buttons.
+
+#### O. Silent 9-to-5 Windows Background Runner & Watchdog Daemon
+- `BusinessHourGuard` enforces execution exclusively during standard business hours (Monday-Friday, 09:00 - 17:00), automatically pausing during evenings and weekends to safeguard account health and mimic human activity.
+- `run_9to5_silent.vbs` executes the background daemon completely hidden with 0 console windows and 0 taskbar clutter.
+- `run_9to5_background.bat` provides an interactive terminal control center for diagnostics, background log tailing, and clean worker termination.
+
 ---
 
 ## 5. Security and Trust Boundaries

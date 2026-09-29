@@ -183,6 +183,17 @@ class TelegramCompanionService:
             for d in drafts[:5]:
                 lines.append(f"• <b>{d.company}</b> ({d.recruiter_name}) — ID: <code>{d.draft_id}</code>\n  Subject: <i>{d.subject}</i>")
             return "\n".join(lines)
+        elif cmd == "/outreach":
+            from app.services.email_outreach_service import email_outreach_service
+            drafts = email_outreach_service.list_drafts(status="DRAFT")
+            if not drafts:
+                return "📭 <b>Recruiter Outreach:</b> No pending recruiter outreach drafts."
+            lines = [f"🤝 <b>Pending Recruiter Outreach ({len(drafts)}):</b>\n"]
+            for d in drafts[:5]:
+                channel_str = d.channel.value if hasattr(d.channel, "value") else str(d.channel)
+                recruiter_name = d.recipient.name if (d.recipient and d.recipient.name) else "Recruiter"
+                lines.append(f"• <b>{recruiter_name}</b> at {d.company} ({channel_str.upper()}) — ID: <code>{d.id}</code>\n  Role: <i>{d.job_title}</i>")
+            return "\n".join(lines)
         elif cmd == "/pause":
             return "⏸️ Application scheduler has been <b>PAUSED</b> via mobile companion."
         elif cmd == "/resume":
@@ -194,6 +205,7 @@ class TelegramCompanionService:
                 "/today - Today's application metrics\n"
                 "/review - Pending pre-submit reviews\n"
                 "/drafts - Pending recruiter RSVP reply drafts\n"
+                "/outreach - Pending recruiter outreach drafts\n"
                 "/pause - Pause application scheduler\n"
                 "/resume - Resume application scheduler"
             )
@@ -310,6 +322,43 @@ class TelegramCompanionService:
                     "action": "RSVP_DISMISSED",
                     "draft_id": draft_id,
                     "message": f"Draft {draft_id} dismissed."
+                }
+
+        elif action == "outreach":
+            # Format: outreach_send_{draft_id} or outreach_view_{draft_id} or outreach_dismiss_{draft_id}
+            subparts = callback_data.split("_", 2)
+            subaction = subparts[1] if len(subparts) > 1 else ""
+            outreach_id = subparts[2] if len(subparts) > 2 else ""
+            from app.services.email_outreach_service import email_outreach_service
+
+            if subaction == "send":
+                result = email_outreach_service.send_outreach(outreach_id)
+                if result.get("success"):
+                    return {
+                        "success": True,
+                        "action": "OUTREACH_SENT",
+                        "outreach_id": outreach_id,
+                        "message": f"🚀 Outreach dispatched successfully for draft {outreach_id}!"
+                    }
+                return {"success": False, "error": result.get("error", "Failed to send outreach.")}
+            elif subaction == "view":
+                draft = email_outreach_service.get_draft(outreach_id)
+                if draft:
+                    channel_val = draft.channel.value if hasattr(draft.channel, "value") else str(draft.channel)
+                    return {
+                        "success": True,
+                        "action": "OUTREACH_VIEW",
+                        "outreach_id": outreach_id,
+                        "message": f"✉️ <b>Outreach Draft ({channel_val.upper()}):</b>\n\n{draft.body_text}"
+                    }
+                return {"success": False, "error": f"Outreach draft {outreach_id} not found."}
+            elif subaction == "dismiss":
+                success = email_outreach_service.dismiss_draft(outreach_id)
+                return {
+                    "success": success,
+                    "action": "OUTREACH_DISMISSED",
+                    "outreach_id": outreach_id,
+                    "message": f"Outreach draft {outreach_id} dismissed."
                 }
 
         return {"success": False, "error": "Unknown callback action"}

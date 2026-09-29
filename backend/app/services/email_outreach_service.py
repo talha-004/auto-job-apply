@@ -95,6 +95,26 @@ class EmailOutreachService:
                 requires_approval=settings.OUTREACH_REQUIRE_APPROVAL
             )
 
+        elif channel == OutreachChannel.LINKEDIN_MESSAGE:
+            # Concise, under-300 character LinkedIn connection note
+            body_text = (
+                f"Hi {greeting_name}, I recently applied for the {job_title} role at {company}. "
+                f"With my experience in {top_skills}, I'm very excited about your team's work and would love to connect!"
+            )
+            if len(body_text) > 300:
+                body_text = body_text[:297] + "..."
+            msg = OutreachMessage(
+                job_id=job_id,
+                job_title=job_title,
+                company=company,
+                recipient=recipient,
+                channel=OutreachChannel.LINKEDIN_MESSAGE,
+                subject=f"Connecting re: {job_title} at {company}",
+                body_text=body_text,
+                status=OutreachStatus.DRAFTED,
+                requires_approval=settings.OUTREACH_REQUIRE_APPROVAL
+            )
+
         else:
             # Professional cold application email
             subject = f"Application for {job_title} - {profile.full_name}"
@@ -130,6 +150,66 @@ class EmailOutreachService:
         # Save draft locally
         self._save_outreach(msg)
         return msg
+
+    async def trigger_post_application_outreach(
+        self,
+        job_id: str,
+        job_title: str,
+        company: str,
+        jd_text: Optional[str] = None
+    ) -> Optional[OutreachMessage]:
+        """Discovers a recruiter lead and drafts an outreach note with 1-tap Telegram dispatch."""
+        from app.services.recruiter_discovery import recruiter_discovery
+        lead = None
+        if jd_text:
+            lead = recruiter_discovery.extract_recruiter_from_text(jd_text, company)
+        if not lead:
+            leads = recruiter_discovery.discover_leads_for_company(company, job_title)
+            lead = leads[0] if leads else None
+
+        if not lead:
+            return None
+
+        recipient = RecruiterContact(
+            name=lead.name,
+            email=lead.email,
+            contact_type="recruiter",
+            company=company
+        )
+
+        draft = await self.draft_outreach(
+            job_id=job_id,
+            job_title=job_title,
+            company=company,
+            recipient=recipient,
+            channel=OutreachChannel.LINKEDIN_MESSAGE
+        )
+
+        # Notify via Telegram with 1-tap dispatch
+        try:
+            from app.services.telegram_bot import telegram_companion
+            alert_text = (
+                f"🤝 <b>Recruiter Outreach Drafted</b>\n\n"
+                f"🏢 <b>Company:</b> {company}\n"
+                f"💼 <b>Role:</b> {job_title}\n"
+                f"👤 <b>Recruiter:</b> {lead.name}\n"
+                f"📝 <b>Note:</b> <i>{draft.body_text}</i>\n\n"
+                f"<i>Tap below to approve or view outreach:</i>"
+            )
+            inline_keyboard = [
+                [
+                    {"text": "📨 Approve & Send", "callback_data": f"outreach_send_{draft.id}"},
+                    {"text": "👀 View Note", "callback_data": f"outreach_view_{draft.id}"}
+                ],
+                [
+                    {"text": "❌ Dismiss", "callback_data": f"outreach_dismiss_{draft.id}"}
+                ]
+            ]
+            await telegram_companion.send_message(alert_text, reply_markup={"inline_keyboard": inline_keyboard})
+        except Exception as e:
+            logger.warning(f"Could not push outreach Telegram alert: {e}")
+
+        return draft
 
     async def _generate_llm_email_draft(
         self,
@@ -339,6 +419,50 @@ Return JSON:
         path = self.outreach_dir / f"{msg.id}.json"
         with open(path, "w", encoding="utf-8") as f:
             json.dump(msg.model_dump(), f, indent=2, ensure_ascii=False)
+
+    def get_draft(self, outreach_id: str) -> Optional[OutreachMessage]:
+        """Convenience alias for get_outreach."""
+        return self.get_outreach(outreach_id)
+
+    def list_drafts(self, status: Optional[str] = "DRAFT") -> List[OutreachMessage]:
+        """List drafts by status string."""
+        target_status = OutreachStatus.DRAFTED if status in ("DRAFT", "DRAFTED") else None
+        return self.list_outreach_messages(status=target_status)
+
+    def dismiss_draft(self, outreach_id: str) -> bool:
+        """Marks an outreach draft as dismissed/cancelled."""
+        msg = self.get_outreach(outreach_id)
+        if not msg:
+            return False
+        msg.status = OutreachStatus.FAILED
+        msg.error_message = "Dismissed by user."
+        self._save_outreach(msg)
+        return True
+
+    def send_outreach(self, outreach_id: str) -> Dict[str, Any]:
+        """Approves and dispatches an outreach message according to its channel."""
+        msg = self.get_outreach(outreach_id)
+        if not msg:
+            return {"success": False, "error": f"Outreach draft '{outreach_id}' not found."}
+
+        if msg.channel == OutreachChannel.EMAIL:
+            try:
+                self.send_email(outreach_id, force_send=True)
+                return {"success": True, "message": "Email sent successfully."}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        elif msg.channel == OutreachChannel.LINKEDIN_MESSAGE:
+            msg.status = OutreachStatus.SENT
+            msg.sent_at = datetime.now().isoformat()
+            self._save_outreach(msg)
+            return {"success": True, "message": "LinkedIn connection note approved and recorded."}
+        elif msg.channel == OutreachChannel.WHATSAPP:
+            msg.status = OutreachStatus.SENT
+            msg.sent_at = datetime.now().isoformat()
+            self._save_outreach(msg)
+            return {"success": True, "message": "WhatsApp outreach approved.", "whatsapp_url": msg.whatsapp_url}
+
+        return {"success": False, "error": f"Unsupported outreach channel: {msg.channel}"}
 
 
 email_outreach_service = EmailOutreachService()
