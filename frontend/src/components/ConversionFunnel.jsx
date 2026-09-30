@@ -8,11 +8,13 @@ import {
   RefreshCw, 
   Clock, 
   BarChart3, 
-  ExternalLink,
-  ChevronRight,
-  Filter
+  Filter,
+  ArrowDown,
+  Sparkles,
+  Layers
 } from 'lucide-react';
 import { analyticsAPI, followupAPI } from '../services/api';
+import './ConversionFunnel.css';
 
 export function ConversionFunnel() {
   const [funnel, setFunnel] = useState(null);
@@ -52,10 +54,10 @@ export function ConversionFunnel() {
     setApprovingId(appId);
     try {
       await followupAPI.approve(appId);
-      setFeedback({ msg: 'Follow-up email approved and dispatched!', type: 'success' });
+      setFeedback({ msg: 'Follow-up email approved and dispatched successfully!', type: 'success' });
       setFollowups(prev => prev.filter(f => f.application_id !== appId));
     } catch (err) {
-      setFeedback({ msg: 'Failed to approve follow-up: Daily cap reached or error.', type: 'error' });
+      setFeedback({ msg: 'Failed to approve follow-up: Daily cap reached or server error.', type: 'error' });
     } finally {
       setApprovingId(null);
       setTimeout(() => setFeedback(null), 4000);
@@ -63,193 +65,236 @@ export function ConversionFunnel() {
   };
 
   return (
-    <div className="space-y-8 animate-fade-in text-slate-100">
+    <div className="cf-container">
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            <TrendingUp className="w-7 h-7 text-indigo-400" />
+      <div className="cf-header">
+        <div className="cf-title-group">
+          <h2 className="cf-title">
+            <TrendingUp size={24} color="#38bdf8" />
             Conversion Funnel & Performance Analytics
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="cf-subtitle">
             Real-time pipeline tracking, multi-platform ROI, and automated 5-day recruiter follow-up management.
           </p>
         </div>
         <button
           onClick={loadAllAnalytics}
           disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium rounded-lg border border-slate-700 transition"
+          className="cf-refresh-btn"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Metrics
+          <RefreshCw size={15} className={loading ? 'cf-spin' : ''} />
+          {loading ? 'Refreshing...' : 'Refresh Metrics'}
         </button>
       </div>
 
+      {/* Toast Feedback */}
       {feedback && (
-        <div className={`p-4 rounded-lg border text-sm flex items-center gap-2 ${
-          feedback.type === 'success' 
-            ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' 
-            : 'bg-rose-950/40 border-rose-800 text-rose-300'
-        }`}>
-          <CheckCircle className="w-5 h-5 flex-shrink-0" />
-          <span>{feedback.msg}</span>
+        <div className={`cf-toast ${feedback.type === 'success' ? 'cf-toast-success' : 'cf-toast-error'}`}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle size={16} />
+            <span>{feedback.msg}</span>
+          </div>
+          <button onClick={() => setFeedback(null)} className="cf-toast-close">×</button>
         </div>
       )}
 
       {/* KPI Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Total Applications
-            <Send className="w-4 h-4 text-indigo-400" />
+      <div className="cf-kpi-grid">
+        {/* Card 1: Total Applications */}
+        <div className="cf-kpi-card">
+          <div className="cf-kpi-glow-bar" style={{ background: 'linear-gradient(90deg, #0284c7, #38bdf8)' }} />
+          <div className="cf-kpi-header">
+            <span>Total Applications</span>
+            <div className="cf-kpi-icon-wrap" style={{ color: '#38bdf8' }}>
+              <Send size={16} />
+            </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white">{summary?.total_applications ?? 0}</span>
-            <span className="text-xs text-indigo-400 font-medium">Submitted</span>
-          </div>
-        </div>
-
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Interviews Scheduled
-            <Calendar className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white">{summary?.interviews_scheduled ?? 0}</span>
-            <span className="text-xs text-emerald-400 font-medium">Callbacks</span>
+          <div className="cf-kpi-body">
+            <span className="cf-kpi-val">{summary?.total_applications ?? 0}</span>
+            <span className="cf-kpi-tag" style={{ color: '#38bdf8' }}>Submitted</span>
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Interview Rate
-            <TrendingUp className="w-4 h-4 text-amber-400" />
+        {/* Card 2: Interviews Scheduled */}
+        <div className="cf-kpi-card">
+          <div className="cf-kpi-glow-bar" style={{ background: 'linear-gradient(90deg, #059669, #10b981)' }} />
+          <div className="cf-kpi-header">
+            <span>Interviews Scheduled</span>
+            <div className="cf-kpi-icon-wrap" style={{ color: '#10b981' }}>
+              <Calendar size={16} />
+            </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white">{summary?.interview_rate_pct ?? 0}%</span>
-            <span className="text-xs text-amber-400 font-medium">Applied-to-Interview</span>
+          <div className="cf-kpi-body">
+            <span className="cf-kpi-val">{summary?.interviews_scheduled ?? 0}</span>
+            <span className="cf-kpi-tag" style={{ color: '#10b981' }}>Callbacks</span>
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Top Performing Channel
-            <Award className="w-4 h-4 text-purple-400" />
+        {/* Card 3: Interview Rate */}
+        <div className="cf-kpi-card">
+          <div className="cf-kpi-glow-bar" style={{ background: 'linear-gradient(90deg, #d97706, #f59e0b)' }} />
+          <div className="cf-kpi-header">
+            <span>Interview Rate</span>
+            <div className="cf-kpi-icon-wrap" style={{ color: '#f59e0b' }}>
+              <TrendingUp size={16} />
+            </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-white truncate">{summary?.top_performing_platform ?? 'LinkedIn'}</span>
+          <div className="cf-kpi-body">
+            <span className="cf-kpi-val">{summary?.interview_rate_pct ?? 0}%</span>
+            <span className="cf-kpi-tag" style={{ color: '#f59e0b' }}>Applied-to-Interview</span>
+          </div>
+        </div>
+
+        {/* Card 4: Top Channel */}
+        <div className="cf-kpi-card">
+          <div className="cf-kpi-glow-bar" style={{ background: 'linear-gradient(90deg, #7c3aed, #a855f7)' }} />
+          <div className="cf-kpi-header">
+            <span>Top Performing Channel</span>
+            <div className="cf-kpi-icon-wrap" style={{ color: '#a855f7' }}>
+              <Award size={16} />
+            </div>
+          </div>
+          <div className="cf-kpi-body">
+            <span className="cf-kpi-val" style={{ fontSize: '1.4rem' }}>
+              {summary?.top_performing_platform ?? 'N/A'}
+            </span>
+            <span className="cf-kpi-tag" style={{ color: '#a855f7' }}>Top Channel</span>
           </div>
         </div>
       </div>
 
       {/* Main Grid: Visual Funnel & Platform ROI */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="cf-main-grid">
         {/* Stage-by-Stage Visual Funnel */}
-        <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-xl p-6 backdrop-blur-sm">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
-            <BarChart3 className="w-5 h-5 text-indigo-400" />
-            Stage-by-Stage Pipeline Funnel
-          </h3>
+        <div className="cf-funnel-card">
+          <div>
+            <h3 className="cf-section-title">
+              <BarChart3 size={20} color="#38bdf8" />
+              Stage-by-Stage Pipeline Funnel
+            </h3>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              Step-by-step conversion progression from initial job discovery to final offer receipt.
+            </p>
+          </div>
 
-          <div className="space-y-5">
-            {funnel?.stages?.map((stage, idx) => (
-              <div key={idx} className="space-y-1.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-semibold text-slate-200">{stage.stage}</span>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="text-slate-400 font-mono">{stage.count} items</span>
-                    <span className="px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 border border-slate-700 font-mono">
-                      {stage.conversion_from_previous_pct}% from prev
-                    </span>
+          <div className="cf-stages-list">
+            {funnel?.stages && funnel.stages.length > 0 ? (
+              funnel.stages.map((stage, idx) => {
+                const fillWidth = Math.max(stage.count > 0 ? 5 : 0, stage.conversion_from_top_pct);
+                return (
+                  <div key={idx} className="cf-stage-item">
+                    <div className="cf-stage-info">
+                      <div className="cf-stage-name">
+                        <span>{stage.stage}</span>
+                      </div>
+                      <div className="cf-stage-metrics">
+                        <span className="cf-stage-count">{stage.count} {stage.count === 1 ? 'item' : 'items'}</span>
+                        <span className="cf-stage-rate-pill">
+                          {stage.conversion_from_previous_pct}% from prev
+                        </span>
+                      </div>
+                    </div>
+                    <div className="cf-track">
+                      <div 
+                        className="cf-fill"
+                        style={{ width: `${fillWidth}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-3.5 overflow-hidden">
-                  <div 
-                    className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400"
-                    style={{ width: `${Math.max(4, stage.conversion_from_top_pct)}%` }}
-                  />
-                </div>
+                );
+              })
+            ) : (
+              <div className="cf-empty-state">
+                <Layers className="cf-empty-icon" />
+                <span>No pipeline stages recorded yet. Launch application bot to begin populating funnel telemetry.</span>
               </div>
-            ))}
+            )}
           </div>
         </div>
 
         {/* Platform ROI Cards */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 backdrop-blur-sm flex flex-col justify-between">
+        <div className="cf-roi-card">
           <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-              <Filter className="w-5 h-5 text-emerald-400" />
+            <h3 className="cf-section-title">
+              <Filter size={19} color="#10b981" />
               Platform ROI Breakdown
             </h3>
-            <p className="text-xs text-slate-400 mb-5">
-              Comparative volume and conversion efficacy across active job discovery providers.
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              Application throughput and callback rates across integrated job portals.
             </p>
+          </div>
 
-            <div className="space-y-4">
-              {roi.map((p, idx) => (
-                <div key={idx} className="bg-slate-800/50 border border-slate-700/60 rounded-lg p-3.5 flex items-center justify-between">
+          <div className="cf-roi-list">
+            {roi && roi.length > 0 ? (
+              roi.map((p, idx) => (
+                <div key={idx} className="cf-roi-item">
                   <div>
-                    <div className="font-bold text-white text-sm">{p.platform}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      {p.applications_count} applied • {p.interviews_count} interviews
+                    <div className="cf-platform-title">{p.platform}</div>
+                    <div className="cf-platform-stats">
+                      {p.applications_count} applied • {p.interviews_count} callbacks
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-emerald-400">{p.conversion_rate_pct}%</div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-wider">Conversion</div>
+                  <div className="cf-roi-badge">
+                    <span className="cf-roi-pct">{p.conversion_rate_pct}%</span>
+                    <span className="cf-roi-label">Conversion</span>
                   </div>
                 </div>
-              ))}
-            </div>
+              ))
+            ) : (
+              <div className="cf-empty-state">
+                <Sparkles className="cf-empty-icon" />
+                <span>No channel telemetry recorded yet.</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Recruiter 5-Day Follow-Up Center */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 backdrop-blur-sm">
-        <div className="flex items-center justify-between mb-5">
+      <div className="cf-followup-card">
+        <div className="cf-followup-header">
           <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Clock className="w-5 h-5 text-amber-400" />
+            <h3 className="cf-section-title">
+              <Clock size={20} color="#fbbf24" />
               Automated 5-Day Follow-Up Queue
             </h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Applications submitted $\ge$ 5 business days ago with no response. Send a polite 3-sentence check-in to boost interview callbacks.
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              Applications submitted $\ge$ 5 business days ago with no reply. Send polite 3-sentence check-in drafts to maximize interview response rates.
             </p>
           </div>
-          <span className="text-xs font-mono px-3 py-1 bg-amber-950/40 text-amber-300 border border-amber-800/60 rounded-full">
+          <span className="cf-eligible-pill">
             {followups.length} Eligible
           </span>
         </div>
 
         {followups.length === 0 ? (
-          <div className="text-center py-8 border border-dashed border-slate-800 rounded-lg text-slate-400 text-sm">
-            <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-70" />
-            No applications currently pending follow-up. All applications under 5 days old or already checked in.
+          <div className="cf-empty-state">
+            <CheckCircle className="cf-empty-icon" />
+            <span>No applications currently pending follow-up. All applications are under 5 days old or already checked in.</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="cf-followups-grid">
             {followups.map((item, idx) => (
-              <div key={idx} className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-4 flex flex-col justify-between space-y-3">
+              <div key={idx} className="cf-followup-item">
                 <div>
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-white text-sm">{item.job_title}</h4>
-                    <span className="text-xs text-amber-400 font-mono">{item.days_elapsed} days ago</span>
+                  <div className="cf-followup-top">
+                    <span className="cf-followup-title">{item.job_title}</span>
+                    <span className="cf-followup-days">{item.days_elapsed}d ago</span>
                   </div>
-                  <div className="text-xs text-slate-300 font-medium">{item.company}</div>
-                  <div className="text-[11px] text-slate-400 mt-1 truncate">To: {item.recommended_recipient}</div>
-                  <div className="mt-3 p-2.5 bg-slate-900/80 rounded border border-slate-800 text-xs text-slate-300 font-mono whitespace-pre-wrap line-clamp-3">
+                  <div className="cf-followup-company">{item.company}</div>
+                  <div className="cf-followup-to">To: {item.recommended_recipient}</div>
+                  <div className="cf-followup-preview">
                     {item.draft_body}
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <div className="cf-followup-actions">
                   <button
                     onClick={() => handleApproveFollowup(item.application_id)}
                     disabled={approvingId === item.application_id}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
+                    className="cf-approve-btn"
                   >
-                    <Send className="w-3.5 h-3.5" />
+                    <Send size={13} />
                     {approvingId === item.application_id ? 'Dispatching...' : 'Approve & Send Follow-Up'}
                   </button>
                 </div>
@@ -261,4 +306,5 @@ export function ConversionFunnel() {
     </div>
   );
 }
+
 export default ConversionFunnel;
