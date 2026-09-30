@@ -417,6 +417,7 @@ class UnifiedLLMClient(BaseLLMClient):
                 res = await client.generate_text(prompt, system_prompt=system_prompt)
                 if res:
                     return res
+                logger.warning(f"Provider {client.name} returned empty response (rate limit/offline). Trying fallback...")
             except Exception as e:
                 logger.warning(f"Provider {client.name} failed: {e}. Trying fallback...")
         return ""
@@ -428,6 +429,7 @@ class UnifiedLLMClient(BaseLLMClient):
                 res = await client.generate_json(prompt, system_prompt=system_prompt)
                 if res:
                     return res
+                logger.warning(f"Provider {client.name} JSON returned empty response (rate limit/offline). Trying fallback...")
             except Exception as e:
                 logger.warning(f"Provider {client.name} JSON failed: {e}. Trying fallback...")
         return {}

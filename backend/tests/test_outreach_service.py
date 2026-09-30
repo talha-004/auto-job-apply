@@ -16,6 +16,14 @@ from app.services.email_outreach_service import email_outreach_service
 from app.core.config import settings
 
 
+@pytest.fixture(autouse=True)
+def isolate_outreach_dir(tmp_path):
+    orig = email_outreach_service.outreach_dir
+    email_outreach_service.outreach_dir = tmp_path
+    yield
+    email_outreach_service.outreach_dir = orig
+
+
 @pytest.fixture
 def mock_candidate():
     return ResumeProfile(
