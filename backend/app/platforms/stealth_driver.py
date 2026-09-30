@@ -126,12 +126,33 @@ class HumanBiometricsDriver:
         """Moves the mouse cursor along a cubic Bezier curve to the target location."""
         start = (self.current_x, self.current_y)
         end = (target_x, target_y)
-        path = self.calculate_bezier_curve(start, end, num_points=num_points)
-
-        for px, py in path:
-            await page.mouse.move(px, py)
-            step_delay = max(0.002, random.uniform(0.005, 0.015) / speed_factor)
-            await asyncio.sleep(step_delay)
+        distance = math.hypot(target_x - self.current_x, target_y - self.current_y)
+        # 18% probability of natural overshoot & correction for medium/long mouse sweeps (>150px)
+        if distance > 150 and random.random() < 0.18:
+            overshoot_factor = random.uniform(1.02, 1.05)
+            overshoot_x = self.current_x + (target_x - self.current_x) * overshoot_factor
+            overshoot_y = self.current_y + (target_y - self.current_y) * overshoot_factor
+            
+            overshoot_path = self.calculate_bezier_curve(start, (overshoot_x, overshoot_y), num_points=max(10, num_points - 5))
+            for px, py in overshoot_path:
+                await page.mouse.move(px, py)
+                step_delay = max(0.002, random.uniform(0.004, 0.012) / speed_factor)
+                await asyncio.sleep(step_delay)
+            
+            # Brief cognitive pause before correcting
+            await asyncio.sleep(random.uniform(0.03, 0.07))
+            
+            # Smoothly correct back to actual target
+            correction_path = self.calculate_bezier_curve((overshoot_x, overshoot_y), end, num_points=6)
+            for px, py in correction_path:
+                await page.mouse.move(px, py)
+                await asyncio.sleep(max(0.002, random.uniform(0.004, 0.010) / speed_factor))
+        else:
+            path = self.calculate_bezier_curve(start, end, num_points=num_points)
+            for px, py in path:
+                await page.mouse.move(px, py)
+                step_delay = max(0.002, random.uniform(0.005, 0.015) / speed_factor)
+                await asyncio.sleep(step_delay)
 
         self.current_x = target_x
         self.current_y = target_y
@@ -140,7 +161,8 @@ class HumanBiometricsDriver:
         self,
         page: Page,
         target: Union[str, ElementHandle, Locator],
-        click_type: str = "left"
+        click_type: str = "left",
+        is_submit_action: bool = False
     ):
         """Moves cursor to target element with natural curve, hovers briefly, and clicks."""
         if isinstance(target, str):
@@ -158,12 +180,22 @@ class HumanBiometricsDriver:
             await element.click()
             return
 
-        # Target center with slight natural offset
-        target_x = box["x"] + box["width"] * random.uniform(0.35, 0.65)
-        target_y = box["y"] + box["height"] * random.uniform(0.35, 0.65)
+        # Target center with natural offset and organic micro-jitter (±2.5px bounded inside box)
+        jitter_x = random.uniform(-2.5, 2.5)
+        jitter_y = random.uniform(-2.5, 2.5)
+        raw_x = box["x"] + box["width"] * random.uniform(0.38, 0.62) + jitter_x
+        raw_y = box["y"] + box["height"] * random.uniform(0.38, 0.62) + jitter_y
+
+        target_x = max(box["x"] + 2.0, min(box["x"] + box["width"] - 2.0, raw_x))
+        target_y = max(box["y"] + 2.0, min(box["y"] + box["height"] - 2.0, raw_y))
 
         await self.human_move(page, target_x, target_y)
-        await asyncio.sleep(random.uniform(0.08, 0.22))  # Pre-click fixation pause
+
+        # Micro-hesitation before critical / submit action (simulate human review of form)
+        if is_submit_action:
+            await asyncio.sleep(random.uniform(1.2, 2.4))
+        else:
+            await asyncio.sleep(random.uniform(0.08, 0.22))  # Pre-click fixation pause
 
         await page.mouse.down(button=click_type)
         await asyncio.sleep(random.uniform(0.04, 0.09))  # Physical click depression duration

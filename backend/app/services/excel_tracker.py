@@ -106,8 +106,14 @@ class ExcelTracker(BaseStorageRepository):
         self._processed_urls: Dict[str, str] = {}
         self._processed_job_ids: Dict[str, str] = {}
         self._processed_fingerprints: Dict[str, str] = {}
+        self._pending_writes: List[JobApplicationRecord] = []
         self._ensure_workbook_exists()
         self._load_existing_urls()
+
+    @property
+    def pending_writes_count(self) -> int:
+        with self._lock:
+            return len(self._pending_writes)
 
     def _cell(self, row: Any, index: int, default: str = "") -> str:
         """Safely extract and strip a cell value from an Excel row tuple."""
@@ -260,82 +266,143 @@ class ExcelTracker(BaseStorageRepository):
 
         return (False, None, None)
 
+    def _append_record_row(self, ws, record: JobApplicationRecord) -> None:
+        """Helper to format and append a JobApplicationRecord row with proper styling."""
+        row_values = [
+            record.timestamp,
+            record.platform,
+            record.job_title,
+            record.company,
+            record.job_url,
+            record.status.value if isinstance(record.status, ApplicationStatus) else str(record.status),
+            f"{record.match_score}%" if record.match_score is not None else "",
+            record.hr_email or "",
+            record.recruiter_name or "",
+            record.skip_reason or "",
+            record.applied_date,
+            record.notes,
+            record.job_id or "",
+            f"{record.job_quality_score}%" if record.job_quality_score is not None else "",
+            f"{record.priority_score}%" if record.priority_score is not None else "",
+            record.reason_code or ""
+        ]
+
+        ws.append(row_values)
+        new_row_idx = ws.max_row
+        ws.row_dimensions[new_row_idx].height = 20
+
+        # Style row based on status
+        fill_color = None
+        status_str = str(record.status)
+        if ApplicationStatus.SUCCESS.value in status_str or "Success" in status_str:
+            fill_color = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid") # light green
+        elif ApplicationStatus.FAILED.value in status_str or "Failed" in status_str:
+            fill_color = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid") # light red
+        elif ApplicationStatus.MANUAL_REVIEW_NEEDED.value in status_str or "Manual" in status_str:
+            fill_color = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid") # light yellow
+        elif ApplicationStatus.POSSIBLE_DUPLICATE.value in status_str or "Duplicate" in status_str:
+            fill_color = PatternFill(start_color="FFEDD5", end_color="FFEDD5", fill_type="solid") # light orange
+        elif ApplicationStatus.DISCOVERED.value in status_str:
+            fill_color = PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid") # light blue
+        elif ApplicationStatus.SKIPPED.value in status_str:
+            fill_color = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid") # light slate
+        elif ApplicationStatus.APPLYING.value in status_str or "Applying" in status_str:
+            fill_color = PatternFill(start_color="FEF9C3", end_color="FEF9C3", fill_type="solid") # light warm yellow
+
+        border_thin = Border(
+            left=Side(style='thin', color='E2E8F0'),
+            right=Side(style='thin', color='E2E8F0'),
+            top=Side(style='thin', color='E2E8F0'),
+            bottom=Side(style='thin', color='E2E8F0')
+        )
+
+        for col_idx in range(1, len(row_values) + 1):
+            cell = ws.cell(row=new_row_idx, column=col_idx)
+            cell.font = Font(name="Calibri", size=10)
+            cell.border = border_thin
+            cell.alignment = Alignment(vertical="center")
+            if fill_color:
+                cell.fill = fill_color
+
+    def flush_pending_writes(self) -> int:
+        """
+        Attempts to write any records currently buffered in the pending writes queue to Excel.
+        Returns the number of successfully flushed records.
+        """
+        import time
+        with self._lock:
+            if not self._pending_writes:
+                return 0
+            try:
+                wb = openpyxl.load_workbook(str(self.file_path))
+                ws = wb.active
+                flushed = 0
+                while self._pending_writes:
+                    rec = self._pending_writes[0]
+                    self._append_record_row(ws, rec)
+                    self._pending_writes.pop(0)
+                    flushed += 1
+
+                wb.save(str(self.file_path))
+                logger.info(f"[ExcelTracker] Successfully flushed {flushed} pending records to Excel.")
+                return flushed
+            except (PermissionError, IOError, OSError) as e:
+                logger.warning(f"[ExcelTracker] Excel file still locked during flush: {e}. Retaining {len(self._pending_writes)} records.")
+                return 0
+            except Exception as e:
+                logger.error(f"[ExcelTracker] Error during pending writes flush: {e}")
+                return 0
+
     def log_application(self, record: JobApplicationRecord) -> bool:
-        """Thread-safely append a new job application record to the Excel sheet. Returns True on success, False on error."""
+        """
+        Thread-safely append a new job application record to the Excel sheet.
+        Updates in-memory duplicate indexes immediately and buffers records if file is locked.
+        """
+        import time
+        # 1. Update in-memory deduplication indexes immediately so caller never duplicates
+        status_val = str(record.status.value if isinstance(record.status, ApplicationStatus) else record.status)
+        if record.job_id:
+            self._processed_job_ids[record.job_id] = status_val
+        if record.job_url:
+            norm = self._normalize_url(record.job_url)
+            self._applied_urls.add(norm)
+            self._processed_urls[norm] = status_val
+            fp = compute_job_fingerprint(record.company, record.job_title)
+            if fp:
+                self._processed_fingerprints[fp] = status_val
+
         with self._lock:
             try:
                 wb = openpyxl.load_workbook(str(self.file_path))
                 ws = wb.active
 
-                row_values = [
-                    record.timestamp,
-                    record.platform,
-                    record.job_title,
-                    record.company,
-                    record.job_url,
-                    record.status.value if isinstance(record.status, ApplicationStatus) else str(record.status),
-                    f"{record.match_score}%" if record.match_score is not None else "",
-                    record.hr_email or "",
-                    record.recruiter_name or "",
-                    record.skip_reason or "",
-                    record.applied_date,
-                    record.notes,
-                    record.job_id or "",
-                    f"{record.job_quality_score}%" if record.job_quality_score is not None else "",
-                    f"{record.priority_score}%" if record.priority_score is not None else "",
-                    record.reason_code or ""
-                ]
+                # Drain previously buffered writes if any
+                while self._pending_writes:
+                    pending_rec = self._pending_writes.pop(0)
+                    self._append_record_row(ws, pending_rec)
 
-                ws.append(row_values)
-                new_row_idx = ws.max_row
-                ws.row_dimensions[new_row_idx].height = 20
+                # Append current record
+                self._append_record_row(ws, record)
 
-                # Style row based on status
-                fill_color = None
-                status_str = str(record.status)
-                if ApplicationStatus.SUCCESS.value in status_str or "Success" in status_str:
-                    fill_color = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid") # light green
-                elif ApplicationStatus.FAILED.value in status_str or "Failed" in status_str:
-                    fill_color = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid") # light red
-                elif ApplicationStatus.MANUAL_REVIEW_NEEDED.value in status_str or "Manual" in status_str:
-                    fill_color = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid") # light yellow
-                elif ApplicationStatus.POSSIBLE_DUPLICATE.value in status_str or "Duplicate" in status_str:
-                    fill_color = PatternFill(start_color="FFEDD5", end_color="FFEDD5", fill_type="solid") # light orange
-                elif ApplicationStatus.DISCOVERED.value in status_str:
-                    fill_color = PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid") # light blue
-                elif ApplicationStatus.SKIPPED.value in status_str:
-                    fill_color = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid") # light slate
-                elif ApplicationStatus.APPLYING.value in status_str or "Applying" in status_str:
-                    fill_color = PatternFill(start_color="FEF9C3", end_color="FEF9C3", fill_type="solid") # light warm yellow
-
-                border_thin = Border(
-                    left=Side(style='thin', color='E2E8F0'),
-                    right=Side(style='thin', color='E2E8F0'),
-                    top=Side(style='thin', color='E2E8F0'),
-                    bottom=Side(style='thin', color='E2E8F0')
-                )
-
-                for col_idx in range(1, len(row_values) + 1):
-                    cell = ws.cell(row=new_row_idx, column=col_idx)
-                    cell.font = Font(name="Calibri", size=10)
-                    cell.border = border_thin
-                    cell.alignment = Alignment(vertical="center")
-                    if fill_color:
-                        cell.fill = fill_color
-
-                wb.save(str(self.file_path))
-                status_val = str(record.status.value if isinstance(record.status, ApplicationStatus) else record.status)
-                if record.job_id:
-                    self._processed_job_ids[record.job_id] = status_val
-                if record.job_url:
-                    norm = self._normalize_url(record.job_url)
-                    self._applied_urls.add(norm)
-                    self._processed_urls[norm] = status_val
-                    fp = compute_job_fingerprint(record.company, record.job_title)
-                    if fp:
-                        self._processed_fingerprints[fp] = status_val
-
-                logger.info(f"Recorded application to Excel: {record.job_title} at {record.company} [{record.status}]")
+                # Retry wb.save with exponential backoff if file is temporarily locked
+                for attempt in range(3):
+                    try:
+                        wb.save(str(self.file_path))
+                        logger.info(f"Recorded application to Excel: {record.job_title} at {record.company} [{record.status}]")
+                        return True
+                    except (PermissionError, IOError, OSError) as lock_err:
+                        if attempt < 2:
+                            time.sleep(0.2 * (attempt + 1))
+                        else:
+                            logger.warning(
+                                f"[ExcelTracker] Excel file locked by user (e.g. open in Microsoft Excel): {lock_err}. "
+                                f"Buffering record in memory ({len(self._pending_writes) + 1} pending). Will auto-flush once unlocked."
+                            )
+                            self._pending_writes.append(record)
+                            return True
+            except (PermissionError, IOError, OSError) as e:
+                logger.warning(f"[ExcelTracker] Excel workbook could not be loaded (file locked): {e}. Buffering record.")
+                self._pending_writes.append(record)
                 return True
             except Exception as e:
                 logger.error(f"Failed to log application to Excel: {e}")
@@ -348,10 +415,13 @@ class ExcelTracker(BaseStorageRepository):
         notes: Optional[str] = None,
         reason_code: Optional[str] = None
     ) -> bool:
-        """Update the status and notes of an existing record matched by job URL."""
+        """Update the status and notes of an existing record matched by job URL with lock resilience."""
+        import time
         if not job_url:
             return False
         norm_target = self._normalize_url(job_url)
+        status_str = new_status.value if isinstance(new_status, ApplicationStatus) else str(new_status)
+        self._processed_urls[norm_target] = status_str
 
         with self._lock:
             try:
@@ -370,7 +440,6 @@ class ExcelTracker(BaseStorageRepository):
                     return False
 
                 # Column 6: Status
-                status_str = new_status.value if isinstance(new_status, ApplicationStatus) else str(new_status)
                 ws.cell(row=target_row, column=6).value = status_str
 
                 # Column 11: Applied Date if now Success/Applied
@@ -402,9 +471,21 @@ class ExcelTracker(BaseStorageRepository):
                     for col_idx in range(1, max(len(self.COLUMNS), ws.max_column) + 1):
                         ws.cell(row=target_row, column=col_idx).fill = fill_color
 
-                wb.save(str(self.file_path))
-                self._processed_urls[norm_target] = status_str
-                logger.info(f"Updated application status in Excel for {norm_target} -> {status_str}")
+                # Retry wb.save with backoff
+                for attempt in range(3):
+                    try:
+                        wb.save(str(self.file_path))
+                        logger.info(f"Updated application status in Excel for {norm_target} -> {status_str}")
+                        return True
+                    except (PermissionError, IOError, OSError) as lock_err:
+                        if attempt < 2:
+                            time.sleep(0.2 * (attempt + 1))
+                        else:
+                            logger.warning(f"[ExcelTracker] Excel file locked while updating status: {lock_err}. Cached in-memory status.")
+                            return True
+                return True
+            except (PermissionError, IOError, OSError) as e:
+                logger.warning(f"[ExcelTracker] Workbook locked during update_application_status: {e}. In-memory status cached.")
                 return True
             except Exception as e:
                 logger.error(f"Failed to update application status in Excel: {e}")

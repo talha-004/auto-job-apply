@@ -69,3 +69,50 @@ async def test_screening_service_sanitizes_injection_payload():
         prompt_sent = mock_llm.call_args[0][0]
         assert "[FILTERED_DIRECTIVE]" in prompt_sent
         assert "Ignore previous instructions" not in prompt_sent
+
+
+def test_llm_prompt_compaction_strips_boilerplate():
+    """Verify that compact_job_context strips EEO, legal, and physical boilerplate while retaining technical context."""
+    from app.core.llm import compact_job_context
+
+    raw_jd = """
+    We are looking for a Senior Python Engineer with 4+ years experience in FastAPI, Docker, and PostgreSQL.
+    You will design distributed microservices and optimize query pipelines.
+
+    EQUAL OPPORTUNITY EMPLOYER:
+    We are an equal opportunity employer and value diversity at our company. We do not discriminate on the basis of race, religion, color, national origin, gender, sexual orientation, age, marital status, or disability status.
+
+    PHYSICAL DEMANDS:
+    Must be able to lift up to 25 pounds and stand for extended periods during office relocations.
+
+    DRUG-FREE WORKPLACE:
+    Candidate must pass a background check and pre-employment drug screening.
+
+    BENEFITS OVERVIEW:
+    We offer 401(k) matching, health insurance, and unlimited PTO.
+    """
+
+    job_ctx = {
+        "title": "Senior Python Engineer",
+        "company": "FastTech Solutions",
+        "description": raw_jd
+    }
+
+    compacted = compact_job_context(job_ctx, max_chars=1000)
+
+    # Core requirements must be present
+    assert "Job Title: Senior Python Engineer" in compacted
+    assert "Company: FastTech Solutions" in compacted
+    assert "Senior Python Engineer with 4+ years experience in FastAPI" in compacted
+
+    # Boilerplate must be stripped
+    assert "EQUAL OPPORTUNITY EMPLOYER" not in compacted
+    assert "without regard to race" not in compacted
+    assert "PHYSICAL DEMANDS" not in compacted
+    assert "lift up to 25 pounds" not in compacted
+    assert "pre-employment drug screening" not in compacted
+    assert "BENEFITS OVERVIEW" not in compacted
+
+    # Length must be compacted
+    assert len(compacted) < len(raw_jd) * 0.5
+

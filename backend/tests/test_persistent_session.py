@@ -191,3 +191,30 @@ def test_platform_directory_isolation():
     assert p_indeed.user_data_dir.name == "indeed"
     assert p_naukri.user_data_dir != p_linkedin.user_data_dir
     assert p_linkedin.user_data_dir != p_indeed.user_data_dir
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_tabs(mock_platform):
+    """Verify cleanup_orphaned_tabs safely closes popup/redirect pages while keeping worker page."""
+    main_page = AsyncMock()
+    main_page.is_closed = MagicMock(return_value=False)
+
+    orphaned_tab1 = AsyncMock()
+    orphaned_tab1.is_closed = MagicMock(return_value=False)
+    orphaned_tab1.close = AsyncMock()
+
+    orphaned_tab2 = AsyncMock()
+    orphaned_tab2.is_closed = MagicMock(return_value=False)
+    orphaned_tab2.close = AsyncMock()
+
+    mock_platform.page = main_page
+    mock_platform.context = MagicMock()
+    mock_platform.context.pages = [main_page, orphaned_tab1, orphaned_tab2]
+
+    closed_count = await mock_platform.cleanup_orphaned_tabs()
+
+    assert closed_count == 2
+    orphaned_tab1.close.assert_called_once()
+    orphaned_tab2.close.assert_called_once()
+    main_page.close.assert_not_called()
+

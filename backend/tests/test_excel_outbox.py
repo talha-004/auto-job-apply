@@ -53,3 +53,33 @@ def test_excel_outbox_handles_file_lock_without_crashing():
         assert flushed == 1
         assert worker.pending_count == 0
         mock_log.assert_called_once_with(rec1)
+
+
+def test_excel_tracker_direct_lock_buffering_and_flush(tmp_path):
+    """Verify ExcelTracker buffers records in memory when PermissionError occurs and flushes upon next save."""
+    from app.services.excel_tracker import ExcelTracker
+    excel_path = tmp_path / "test_applications.xlsx"
+    tracker = ExcelTracker(file_path=excel_path)
+
+    rec = JobApplicationRecord(
+        platform="Naukri",
+        job_url="https://naukri.com/job/lock-resilience-1",
+        job_title="Lead AI Engineer",
+        company="Resilience Corp",
+        status=ApplicationStatus.APPLIED
+    )
+
+    # 1. Simulate PermissionError on openpyxl save
+    with patch("openpyxl.Workbook.save", side_effect=PermissionError("File locked by Excel")):
+        success = tracker.log_application(rec)
+        assert success is True
+        # In-memory indexes MUST be updated immediately
+        assert tracker.is_already_processed("https://naukri.com/job/lock-resilience-1") is True
+        # Record MUST be buffered in pending writes queue
+        assert tracker.pending_writes_count == 1
+
+    # 2. Simulate subsequent flush when file is unlocked
+    flushed = tracker.flush_pending_writes()
+    assert flushed == 1
+    assert tracker.pending_writes_count == 0
+

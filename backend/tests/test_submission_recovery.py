@@ -61,3 +61,89 @@ def test_granular_14_states_integrity():
     for s in expected_states:
         assert hasattr(JobLifecycleStatus, s)
         assert JobLifecycleStatus(s).value == s
+
+
+@pytest.mark.asyncio
+async def test_safe_step_advance_immediate_success():
+    """Verify safe_step_advance returns True immediately when URL advances."""
+    from unittest.mock import AsyncMock, MagicMock
+    mock_page = MagicMock()
+    mock_page.url = "https://boards.greenhouse.io/job/apply/step-1"
+    mock_page.click = AsyncMock()
+
+    mock_btn = AsyncMock()
+    mock_btn.click = AsyncMock()
+
+    # Change URL on click
+    async def simulate_click(*args, **kwargs):
+        mock_page.url = "https://boards.greenhouse.io/job/apply/step-2"
+
+    mock_btn.click.side_effect = simulate_click
+
+    advanced = await submission_recovery_manager.safe_step_advance(
+        page=mock_page,
+        button_target=mock_btn,
+        timeout_seconds=2.0
+    )
+
+    assert advanced is True
+    mock_btn.click.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_safe_step_advance_self_healing_recovery():
+    """Verify safe_step_advance executes scroll-into-view, focus, and Enter fallback when click stalls."""
+    from unittest.mock import AsyncMock, MagicMock
+    mock_page = MagicMock()
+    mock_page.url = "https://workday.com/apply/page1"
+    mock_page.keyboard = MagicMock()
+    mock_page.keyboard.press = AsyncMock()
+
+    mock_btn = MagicMock()
+    mock_btn.click = AsyncMock()  # Click happens but page stalls
+    mock_btn.is_visible = AsyncMock(return_value=True)
+    mock_btn.scroll_into_view_if_needed = AsyncMock()
+    mock_btn.focus = AsyncMock()
+
+    # Keyboard Enter succeeds in transitioning page
+    async def simulate_enter(key):
+        if key == "Enter":
+            mock_page.url = "https://workday.com/apply/page2"
+
+    mock_page.keyboard.press.side_effect = simulate_enter
+
+    advanced = await submission_recovery_manager.safe_step_advance(
+        page=mock_page,
+        button_target=mock_btn,
+        timeout_seconds=2.0
+    )
+
+    assert advanced is True
+    mock_btn.scroll_into_view_if_needed.assert_called_once()
+    mock_btn.focus.assert_called_once()
+    mock_page.keyboard.press.assert_called_once_with("Enter")
+
+
+@pytest.mark.asyncio
+async def test_safe_step_advance_clean_timeout():
+    """Verify safe_step_advance cleanly returns False when broken portal does not advance."""
+    from unittest.mock import AsyncMock, MagicMock
+    mock_page = MagicMock()
+    mock_page.url = "https://brokenportal.com/stalled"
+    mock_page.keyboard = MagicMock()
+    mock_page.keyboard.press = AsyncMock()
+
+    mock_btn = MagicMock()
+    mock_btn.click = AsyncMock()
+    mock_btn.is_visible = AsyncMock(return_value=True)
+    mock_btn.scroll_into_view_if_needed = AsyncMock()
+    mock_btn.focus = AsyncMock()
+
+    advanced = await submission_recovery_manager.safe_step_advance(
+        page=mock_page,
+        button_target=mock_btn,
+        timeout_seconds=1.5
+    )
+
+    assert advanced is False
+

@@ -115,11 +115,42 @@ class BasePlatform(ApplicationAdapter, ABC):
             raise RuntimeError("Browser page not initialized.")
         await self.stealth_driver.human_type(self.page, selector_or_element, text, typo_chance=typo_chance)
 
-    async def human_click(self, target, click_type: str = "left"):
+    async def human_click(self, target, click_type: str = "left", is_submit_action: bool = False):
         """Move cursor with cubic Bezier curve, pause, and click."""
         if not self.page:
             raise RuntimeError("Browser page not initialized.")
-        await self.stealth_driver.human_click(self.page, target, click_type=click_type)
+        await self.stealth_driver.human_click(self.page, target, click_type=click_type, is_submit_action=is_submit_action)
+
+    async def cleanup_orphaned_tabs(self) -> int:
+        """
+        Close orphaned popup and external redirect tabs to bound browser memory usage.
+        Preserves the primary active worker page while safely closing dead/unfocused tabs.
+        Returns the number of closed tabs.
+        """
+        if not self.context:
+            return 0
+        closed_count = 0
+        try:
+            pages = list(self.context.pages)
+            for p in pages:
+                if p != self.page and not getattr(p, "is_closed", lambda: False)():
+                    try:
+                        await p.close()
+                        closed_count += 1
+                    except Exception as e:
+                        logger.debug(f"[{self.platform_name.value}] Failed to close orphaned tab: {e}")
+            if closed_count > 0:
+                logger.info(f"[{self.platform_name.value}] Tab Garbage Collector: closed {closed_count} orphaned tab(s) to conserve RAM.")
+
+            # Flush memory on active page if possible
+            if self.page and not getattr(self.page, "is_closed", lambda: False)():
+                try:
+                    await self.page.evaluate("() => { if (window.gc) window.gc(); }")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"[{self.platform_name.value}] Tab cleanup encountered an error: {e}")
+        return closed_count
 
     async def check_challenge_cooldown(self):
         """Detect anti-bot and rate-limiting triggers, raising PlatformCoolDownException if detected."""
@@ -504,19 +535,8 @@ class BasePlatform(ApplicationAdapter, ABC):
         return False
 
     async def cleanup_extra_pages(self):
-        """Cleanly close any opened popups/tabs, keeping only the main navigation page."""
-        if not self.context:
-            return
-        try:
-            pages = list(self.context.pages)
-        except Exception:
-            return
-        for p in pages:
-            try:
-                if p != self.page and not p.is_closed():
-                    await p.close()
-            except Exception:
-                pass
+        """Cleanly close any opened popups/tabs, keeping only the main navigation page (delegates to cleanup_orphaned_tabs)."""
+        await self.cleanup_orphaned_tabs()
 
     def is_title_relevant(self, job_title: str) -> bool:
         """

@@ -122,3 +122,33 @@ async def test_human_type_simulation():
 
     typed_chars = [call.args[0] for call in mock_page.keyboard.type.call_args_list]
     assert "".join(typed_chars) == "Python"
+
+
+@pytest.mark.asyncio
+async def test_human_click_with_submit_hesitation():
+    """Verify human_click introduces bounded jitter and submit micro-hesitation pause."""
+    driver = HumanBiometricsDriver(current_pos=(100.0, 100.0))
+    mock_page = MagicMock()
+    mock_page.mouse = MagicMock()
+    mock_page.mouse.move = AsyncMock()
+    mock_page.mouse.down = AsyncMock()
+    mock_page.mouse.up = AsyncMock()
+
+    mock_element = MagicMock()
+    mock_element.bounding_box = AsyncMock(return_value={"x": 200.0, "y": 300.0, "width": 120.0, "height": 40.0})
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        await driver.human_click(mock_page, mock_element, is_submit_action=True)
+
+        # Confirm target position was bounded within the element's box (202 <= x <= 318, 302 <= y <= 338)
+        assert 202.0 <= driver.current_x <= 318.0
+        assert 302.0 <= driver.current_y <= 338.0
+
+        # Verify mouse down and up were invoked
+        mock_page.mouse.down.assert_called_once_with(button="left")
+        mock_page.mouse.up.assert_called_once_with(button="left")
+
+        # Verify sleep was called for submit hesitation (> 1.0s)
+        sleep_durations = [call.args[0] for call in mock_sleep.call_args_list]
+        assert any(d >= 1.2 for d in sleep_durations)
+
