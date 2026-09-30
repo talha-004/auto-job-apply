@@ -126,6 +126,18 @@ class BasePlatform(ApplicationAdapter, ABC):
         if self.page:
             await self.stealth_driver.detect_and_handle_challenges(self.page, platform=self.platform_name.value)
 
+    def resolve_resume_for_job(self, job_title: str, job_description: str = "") -> Path:
+        """Dynamically routes the best-matching resume variant if available, falling back to base resume."""
+        try:
+            from app.services.multi_resume_router import multi_resume_router
+            routing = multi_resume_router.route_best_resume(job_title, job_description)
+            routed_path = Path(routing["file_path"])
+            if routed_path.exists():
+                return routed_path
+        except Exception as e:
+            logger.debug(f"[BasePlatform] Dynamic resume routing fallback: {e}")
+        return self.resume_file_path
+
     async def init_browser(self) -> Page:
         """Launch stealth Playwright browser with persistent context or saved cookies."""
         self.playwright = await async_playwright().start()

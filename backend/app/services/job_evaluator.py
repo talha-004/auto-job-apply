@@ -18,13 +18,105 @@ from app.services.job_quality_scorer import job_quality_scorer, JobQualityResult
 from app.platforms.naukri_helpers import extract_job_contacts, JobContact
 
 
+def parse_salary_text(salary_text: str) -> Dict[str, Any]:
+    """
+    Parses compensation text into structured min/max values, currency, and period.
+    Handles:
+      - "12 - 18 LPA", "15 Lacs P.A.", "₹ 12,00,000 - 18,00,000 P.A."
+      - "$120,000 - $160,000 a year", "$120k - $160k"
+      - "$50 - $70 an hour", "$60/hr"
+      - "₹40,000 - ₹60,000 a month"
+    """
+    if not salary_text or not isinstance(salary_text, str):
+        return {"min_salary": None, "max_salary": None, "currency": None, "period": None, "raw": ""}
+
+    text = salary_text.strip()
+    result: Dict[str, Any] = {
+        "min_salary": None,
+        "max_salary": None,
+        "currency": "INR",
+        "period": "LPA",
+        "raw": text
+    }
+
+    # Detect currency
+    if "$" in text or "usd" in text.lower():
+        result["currency"] = "USD"
+        result["period"] = "ANNUAL"
+    elif "€" in text or "eur" in text.lower():
+        result["currency"] = "EUR"
+        result["period"] = "ANNUAL"
+    elif "£" in text or "gbp" in text.lower():
+        result["currency"] = "GBP"
+        result["period"] = "ANNUAL"
+    elif any(k in text.lower() for k in ["₹", "inr", "lpa", "lac", "lakh"]):
+        result["currency"] = "INR"
+        result["period"] = "LPA"
+
+    # Detect frequency
+    if any(k in text.lower() for k in ["/hr", "an hour", "hourly", "per hour"]):
+        result["period"] = "HOURLY"
+    elif any(k in text.lower() for k in ["/mo", "a month", "monthly", "per month"]):
+        result["period"] = "MONTHLY"
+
+    # 1. LPA / Lacs pattern (e.g. "12 - 18 LPA", "15 Lacs P.A.")
+    lpa_match = re.search(r'[\$€£₹]?\s*(\d+(?:\.\d+)?)\s*(?:-|to)?\s*[\$€£₹]?\s*(\d+(?:\.\d+)?)?\s*(?:lpa|lacs?|lakhs?)', text, re.IGNORECASE)
+    if lpa_match:
+        v1 = float(lpa_match.group(1))
+        v2 = float(lpa_match.group(2)) if lpa_match.group(2) else v1
+        result["min_salary"] = min(v1, v2)
+        result["max_salary"] = max(v1, v2)
+        result["period"] = "LPA"
+        result["currency"] = "INR"
+        return result
+
+    # 2. "120k - 160k" notation
+    k_range = re.search(r'[\$€£₹]?\s*(\d+(?:\.\d+)?)\s*k?\s*(?:-|to)\s*[\$€£₹]?\s*(\d+(?:\.\d+)?)\s*k', text, re.IGNORECASE)
+    if k_range:
+        v1 = float(k_range.group(1)) * 1000.0
+        v2 = float(k_range.group(2)) * 1000.0
+        result["min_salary"] = min(v1, v2)
+        result["max_salary"] = max(v1, v2)
+        return result
+
+    single_k = re.search(r'[\$€£₹]?\s*(\d+(?:\.\d+)?)\s*k', text, re.IGNORECASE)
+    if single_k:
+        val = float(single_k.group(1)) * 1000.0
+        result["min_salary"] = val
+        result["max_salary"] = val
+        return result
+
+    # 3. Numeric values with commas (e.g. "1,200,000 - 1,800,000" or "12,00,000")
+    nums = re.findall(r'(\d+(?:,\d+)*(?:\.\d+)?)', text)
+    cleaned = []
+    for n in nums:
+        try:
+            val = float(n.replace(',', ''))
+            if val > 0:
+                cleaned.append(val)
+        except ValueError:
+            pass
+
+    if cleaned:
+        min_v = cleaned[0]
+        max_v = cleaned[1] if len(cleaned) > 1 else min_v
+        if result["currency"] == "INR" and min_v >= 100000.0:
+            min_v = round(min_v / 100000.0, 2)
+            max_v = round(max_v / 100000.0, 2)
+            result["period"] = "LPA"
+        result["min_salary"] = min(min_v, max_v)
+        result["max_salary"] = max(min_v, max_v)
+
+    return result
+
+
 class JobEvaluator:
     """
     Central evaluation coordinator combining:
       1. Deterministic MatchScorer (60/20/10/10 math)
       2. JobQualityScorer (transparency & spam/risk detection)
       3. Contact Extractor (direct recruiter/HR emails)
-      4. Hard Disqualification Rules (blacklists, technology mismatches, extreme risk flags)
+      4. Hard Disqualification Rules (blacklists, compensation/location sanity, technology mismatches)
     """
 
     CRITICAL_RISK_FLAGS = {"DEPOSIT_REQUIRED", "TRAINING_PURCHASE"}
@@ -70,12 +162,59 @@ class JobEvaluator:
                     disqualification_reasons.append(f"Company '{company}' matches excluded company filter '{bad_comp}'.")
 
         # 2. Hard Disqualification: Remote Requirement
-        if config.require_remote:
-            title_loc_text = f"{title.lower()} {location.lower()} {jd_text.lower()[:300]}"
-            is_job_remote = is_remote or "remote" in title_loc_text or "work from home" in title_loc_text or "wfh" in title_loc_text
-            if not is_job_remote:
-                is_hard_disqualified = True
-                disqualification_reasons.append(f"Job is not remote, but search configuration requires remote positions.")
+        title_loc_text = f"{title.lower()} {location.lower()} {jd_text.lower()[:300]}"
+        is_job_remote = is_remote or "remote" in title_loc_text or "work from home" in title_loc_text or "wfh" in title_loc_text
+        if config.require_remote and not is_job_remote:
+            is_hard_disqualified = True
+            disqualification_reasons.append("Job is not remote, but search configuration requires remote positions.")
+
+        # 3. Location Sanity Gating: Prohibited & Allowed Locations
+        if config.prohibited_locations:
+            loc_lower = location.lower()
+            for proh in config.prohibited_locations:
+                if proh and proh.strip().lower() in loc_lower:
+                    is_hard_disqualified = True
+                    disqualification_reasons.append(
+                        f"Location '{location}' is in prohibited locations filter ('{proh}')."
+                    )
+
+        if config.allowed_locations and not is_job_remote:
+            loc_lower = location.lower()
+            matched_allowed = any(allowed.strip().lower() in loc_lower for allowed in config.allowed_locations if allowed.strip())
+            if not matched_allowed:
+                if config.strict_location_enforcement:
+                    is_hard_disqualified = True
+                    disqualification_reasons.append(
+                        f"On-site location '{location}' is outside permitted locations: {config.allowed_locations}."
+                    )
+                else:
+                    disqualification_reasons.append(
+                        f"Location notice: Location '{location}' is outside allowed locations list ({config.allowed_locations})."
+                    )
+
+        # 4. Strict Compensation Sanity Gating
+        salary_source = (
+            raw_metadata.get("salary") or 
+            raw_metadata.get("salary_raw") or 
+            (f"{job.salary_min} - {job.salary_max}" if isinstance(job, DiscoveredJob) and job.salary_min else "") or
+            ""
+        )
+        parsed_salary = parse_salary_text(str(salary_source))
+        if config.min_salary is not None and parsed_salary.get("max_salary") is not None:
+            offered_max = parsed_salary["max_salary"]
+            target_curr = (config.salary_currency or "INR").upper()
+            parsed_curr = (parsed_salary.get("currency") or "INR").upper()
+            if target_curr == parsed_curr:
+                if offered_max < config.min_salary:
+                    reason = (
+                        f"Offered compensation (max {offered_max} {parsed_salary.get('period', '')}) "
+                        f"is below minimum expected floor ({config.min_salary} {target_curr})."
+                    )
+                    if config.strict_salary_enforcement:
+                        is_hard_disqualified = True
+                        disqualification_reasons.append(reason)
+                    else:
+                        disqualification_reasons.append(f"Compensation warning: {reason}")
 
         # 3. Deterministic Match Scoring (60/20/10/10)
         match_res: MatchResult = match_scorer.score_job(

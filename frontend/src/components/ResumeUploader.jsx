@@ -30,6 +30,51 @@ export const ResumeUploader = () => {
   const [newSkill, setNewSkill] = useState('');
   const fileInputRef = useRef(null);
 
+  // Multi-Resume Variants State
+  const [variants, setVariants] = useState([]);
+  const [showAddVariant, setShowAddVariant] = useState(false);
+  const [variantLabel, setVariantLabel] = useState('');
+  const [variantKeywords, setVariantKeywords] = useState('');
+  const [uploadingVariant, setUploadingVariant] = useState(false);
+  const variantFileInputRef = useRef(null);
+
+  const loadVariants = async () => {
+    try {
+      const res = await resumeAPI.getVariants();
+      if (res.variants) {
+        setVariants(res.variants);
+      }
+    } catch (err) {
+      console.warn('Failed to load resume variants:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadVariants();
+  }, []);
+
+  const handleUploadVariant = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!variantLabel.trim()) {
+      alert('Please enter a descriptive label for this resume variant (e.g. Backend Engineer).');
+      return;
+    }
+    try {
+      setUploadingVariant(true);
+      await resumeAPI.uploadVariant(file, variantLabel, variantKeywords);
+      await loadVariants();
+      setShowAddVariant(false);
+      setVariantLabel('');
+      setVariantKeywords('');
+      alert(`Resume variant '${variantLabel}' registered successfully!`);
+    } catch (err) {
+      alert('Failed to upload variant: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setUploadingVariant(false);
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -363,6 +408,127 @@ export const ResumeUploader = () => {
           )}
         </div>
       )}
+
+      {/* Dynamic Multi-Resume Variants Repository */}
+      <div style={{
+        marginTop: '18px',
+        padding: '16px',
+        background: 'rgba(15, 23, 42, 0.4)',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border-color)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+              <Sparkles size={16} color="var(--primary)" />
+              Multi-Resume Auto-Routing Repository
+            </h4>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              ATS automatically selects the highest-scoring resume variant for each specific job JD.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-outline"
+            style={{ fontSize: '0.75rem', padding: '6px 12px' }}
+            onClick={() => setShowAddVariant(!showAddVariant)}
+          >
+            {showAddVariant ? 'Cancel' : '+ Add Variant'}
+          </button>
+        </div>
+
+        {/* Upload New Variant Inline Form */}
+        {showAddVariant && (
+          <div style={{
+            padding: '12px',
+            background: 'rgba(56, 189, 248, 0.05)',
+            border: '1px dashed rgba(56, 189, 248, 0.3)',
+            borderRadius: 'var(--radius-sm)',
+            marginBottom: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+          }}>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <input
+                className="form-input"
+                placeholder="Variant Label (e.g. Backend Python Engineer)"
+                value={variantLabel}
+                onChange={(e) => setVariantLabel(e.target.value)}
+                style={{ flex: 1, minWidth: '200px' }}
+              />
+              <input
+                className="form-input"
+                placeholder="Target Keywords (e.g. python, fastapi, postgresql, docker)"
+                value={variantKeywords}
+                onChange={(e) => setVariantKeywords(e.target.value)}
+                style={{ flex: 1, minWidth: '220px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="file"
+                ref={variantFileInputRef}
+                accept=".pdf"
+                style={{ display: 'none' }}
+                onChange={handleUploadVariant}
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ fontSize: '0.8rem', padding: '8px 16px' }}
+                disabled={uploadingVariant || !variantLabel.trim()}
+                onClick={() => variantFileInputRef.current?.click()}
+              >
+                {uploadingVariant ? 'Uploading...' : 'Select PDF & Save Variant'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* List of Registered Variants */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {variants.length === 0 ? (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              No specialized variants uploaded yet. The bot will use your primary resume.
+            </div>
+          ) : (
+            variants.map((v) => (
+              <div
+                key={v.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.8125rem'
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileText size={14} color="var(--primary)" />
+                    {v.label}
+                    {v.is_default && (
+                      <span style={{ fontSize: '0.68rem', padding: '1px 6px', background: 'rgba(56, 189, 248, 0.2)', color: 'var(--primary)', borderRadius: '4px' }}>
+                        Default
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Keywords: {v.target_keywords?.join(', ') || 'General profile'}
+                  </div>
+                </div>
+                <span style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 600 }}>
+                  Active in Auto-Router
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 };

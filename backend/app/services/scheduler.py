@@ -281,13 +281,11 @@ class AutonomousSchedulerService:
         job_id = "naukri_headline_refresh"
         now_str = datetime.now().isoformat()
         try:
-            logger.info("[Scheduler] Executing Naukri profile activity heartbeat...")
-            await broadcaster.emit_log(
-                "💓 [Scheduler] Naukri profile activity heartbeat executed.",
-                level=LogLevel.INFO,
-                platform="Naukri"
-            )
-            self._record_run_result(job_id, now_str, "SUCCESS")
+            from app.services.naukri_booster import naukri_booster_service
+            logger.info("[Scheduler] Executing daily Naukri profile booster...")
+            boost_res = await naukri_booster_service.boost_profile(dry_run=False)
+            status_str = boost_res.get("status", "SUCCESS")
+            self._record_run_result(job_id, now_str, status_str)
         except Exception as e:
             logger.error(f"[Scheduler] Headline refresh failed: {e}")
             self._record_run_result(job_id, now_str, f"ERROR: {str(e)}")

@@ -5,12 +5,12 @@ title AutoApplyJobs — 9-to-5 Background Runner
 :: Ensure logs directory exists
 if not exist "%~dp0logs" mkdir "%~dp0logs"
 
-:: 1. Detect Python executable
+:: 1. Detect Python executable (prefer backend\venv where packages are installed)
 set "PYTHON_EXE=python"
-if exist "%~dp0venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
-) else if exist "%~dp0backend\venv\Scripts\python.exe" (
+if exist "%~dp0backend\venv\Scripts\python.exe" (
     set "PYTHON_EXE=%~dp0backend\venv\Scripts\python.exe"
+) else if exist "%~dp0venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
 )
 
 :: 2. Handle Silent Mode parameter (from run_9to5_silent.vbs)

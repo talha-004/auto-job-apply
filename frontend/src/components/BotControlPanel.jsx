@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useBot } from '../context/BotContext';
-import { botAPI } from '../services/api';
+import { botAPI, naukriAPI } from '../services/api';
 import { 
   Play, 
   Pause, 
@@ -18,7 +18,10 @@ import {
   Clock,
   Zap,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  DollarSign,
+  Compass,
+  Flame
 } from 'lucide-react';
 
 export const BotControlPanel = () => {
@@ -36,10 +39,20 @@ export const BotControlPanel = () => {
   const [headless, setHeadless] = useState(false);
   const [dryRun, setDryRun] = useState(false);
 
-  // Naukri Profile Headline State
+  // Compensation & Location Sanity Gating State
+  const [minSalary, setMinSalary] = useState('12');
+  const [salaryCurrency, setSalaryCurrency] = useState('INR');
+  const [allowedLocations, setAllowedLocations] = useState('Remote, Bengaluru, Hyderabad, Pune');
+  const [prohibitedLocations, setProhibitedLocations] = useState('');
+  const [strictSalary, setStrictSalary] = useState(false);
+  const [strictLocation, setStrictLocation] = useState(false);
+
+  // Naukri Profile Headline & Booster State
   const [naukriHeadline, setNaukriHeadline] = useState('');
   const [updatingHeadline, setUpdatingHeadline] = useState(false);
   const [headlineMsg, setHeadlineMsg] = useState(null);
+  const [boostingNaukri, setBoostingNaukri] = useState(false);
+  const [boostMsg, setBoostMsg] = useState(null);
 
   // Sync with parsed profile experience and headline if available
   useEffect(() => {
@@ -91,6 +104,12 @@ export const BotControlPanel = () => {
         quick_apply_only: quickApplyOnly,
         min_match_score: parseInt(minMatchScore, 10) || 60,
         match_gating_mode: matchGatingMode,
+        min_salary: minSalary ? parseFloat(minSalary) : null,
+        salary_currency: salaryCurrency,
+        allowed_locations: allowedLocations.split(',').map(s => s.trim()).filter(Boolean),
+        prohibited_locations: prohibitedLocations.split(',').map(s => s.trim()).filter(Boolean),
+        strict_salary_enforcement: strictSalary,
+        strict_location_enforcement: strictLocation,
         headless,
         dry_run: dryRun,
       });
@@ -134,6 +153,12 @@ export const BotControlPanel = () => {
         quick_apply_only: quickApplyOnly,
         min_match_score: parseInt(minMatchScore, 10),
         match_gating_mode: matchGatingMode,
+        min_salary: minSalary ? parseFloat(minSalary) : null,
+        salary_currency: salaryCurrency,
+        allowed_locations: allowedLocations.split(',').map(s => s.trim()).filter(Boolean),
+        prohibited_locations: prohibitedLocations.split(',').map(s => s.trim()).filter(Boolean),
+        strict_salary_enforcement: strictSalary,
+        strict_location_enforcement: strictLocation,
         headless,
         dry_run: dryRun,
       };
@@ -144,6 +169,32 @@ export const BotControlPanel = () => {
       alert('Failed to start bot: ' + (err.response?.data?.detail || err.message));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBoostNaukri = async () => {
+    setBoostingNaukri(true);
+    setBoostMsg(null);
+    try {
+      const res = await naukriAPI.boostProfile(naukriHeadline || null, false);
+      if (res.success) {
+        setBoostMsg({
+          type: 'success',
+          text: `⚡ Active Today Badge Earned! Reach: ${res.result?.recruiter_reach_multiplier || '5.2x (Active Today Badge)'}`
+        });
+      } else {
+        setBoostMsg({
+          type: 'error',
+          text: res.result?.reason || res.result?.error || 'Could not boost Naukri profile.'
+        });
+      }
+    } catch (err) {
+      setBoostMsg({
+        type: 'error',
+        text: err.response?.data?.detail || err.message
+      });
+    } finally {
+      setBoostingNaukri(false);
     }
   };
 
@@ -352,6 +403,65 @@ export const BotControlPanel = () => {
             <option value="enforce">Enforce (Skip Jobs Below Min Score)</option>
           </select>
         </div>
+
+        {/* Min Salary & Currency */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <DollarSign size={14} color="var(--primary)" /> Minimum Salary Floor
+          </label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input 
+              type="number"
+              min="0"
+              step="1"
+              className="form-input" 
+              placeholder="e.g. 12"
+              value={minSalary} 
+              onChange={(e) => setMinSalary(e.target.value)}
+              disabled={!isIdle}
+              style={{ flex: 1 }}
+            />
+            <select
+              className="form-input"
+              value={salaryCurrency}
+              onChange={(e) => setSalaryCurrency(e.target.value)}
+              disabled={!isIdle}
+              style={{ width: '100px' }}
+            >
+              <option value="INR">LPA (₹)</option>
+              <option value="USD">USD ($)</option>
+              <option value="EUR">EUR (€)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Allowed Locations */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Compass size={14} color="var(--primary)" /> Allowed Cities
+          </label>
+          <input 
+            className="form-input" 
+            placeholder="e.g. Remote, Bengaluru, Hyderabad, Pune"
+            value={allowedLocations} 
+            onChange={(e) => setAllowedLocations(e.target.value)}
+            disabled={!isIdle}
+          />
+        </div>
+
+        {/* Prohibited Locations */}
+        <div className="form-group">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <AlertCircle size={14} color="#f87171" /> Prohibited Cities (Strict Exclusion)
+          </label>
+          <input 
+            className="form-input" 
+            placeholder="e.g. Kolkata, Chennai (Comma separated)"
+            value={prohibitedLocations} 
+            onChange={(e) => setProhibitedLocations(e.target.value)}
+            disabled={!isIdle}
+          />
+        </div>
       </div>
 
       {/* Target Platforms Checkboxes */}
@@ -450,11 +560,35 @@ export const BotControlPanel = () => {
           />
           <span><strong style={{ color: '#fbbf24' }}>Dry Run Mode</strong> (Fill forms but do NOT click final submit)</span>
         </label>
+
+        {/* Strict Salary Enforcement */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isIdle ? 'pointer' : 'default', fontSize: '0.8125rem' }}>
+          <input 
+            type="checkbox" 
+            checked={strictSalary} 
+            onChange={(e) => setStrictSalary(e.target.checked)} 
+            disabled={!isIdle}
+            style={{ accentColor: 'var(--danger)' }}
+          />
+          <span><strong style={{ color: '#f87171' }}>Strict Salary Gate</strong> (Hard disqualify jobs below floor)</span>
+        </label>
+
+        {/* Strict Location Enforcement */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: isIdle ? 'pointer' : 'default', fontSize: '0.8125rem' }}>
+          <input 
+            type="checkbox" 
+            checked={strictLocation} 
+            onChange={(e) => setStrictLocation(e.target.checked)} 
+            disabled={!isIdle}
+            style={{ accentColor: 'var(--danger)' }}
+          />
+          <span><strong style={{ color: '#f87171' }}>Strict Location Gate</strong> (Skip on-site roles outside allowed cities)</span>
+        </label>
       </div>
 
-      {/* Authenticated Naukri Profile Headline Management */}
+      {/* Authenticated Naukri Profile Headline Management & Daily Booster */}
       <div style={{
-        padding: '14px 16px',
+        padding: '16px 18px',
         background: 'rgba(56, 189, 248, 0.05)',
         borderRadius: 'var(--radius-md)',
         border: '1px solid rgba(56, 189, 248, 0.2)',
@@ -462,29 +596,48 @@ export const BotControlPanel = () => {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
-            <Sparkles size={14} color="var(--primary)" /> Update Naukri Profile Headline
+            <Flame size={15} color="#10b981" /> Naukri Profile Visibility Booster & Headline
           </label>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            Reuses stored session cookies
+          <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600 }}>
+            Active Today Rank Bumper
           </span>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input 
             className="form-input"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: '240px' }}
             placeholder="e.g. Full Stack Developer | React | Node.js | MongoDB"
             value={naukriHeadline}
             onChange={(e) => setNaukriHeadline(e.target.value)}
-            disabled={!isIdle || updatingHeadline}
+            disabled={!isIdle || updatingHeadline || boostingNaukri}
           />
           <button
             type="button"
             className="btn btn-outline"
             onClick={handleUpdateHeadline}
             disabled={!isIdle || updatingHeadline || !naukriHeadline.trim()}
-            style={{ whiteSpace: 'nowrap', padding: '10px 18px' }}
+            style={{ whiteSpace: 'nowrap', padding: '10px 16px' }}
           >
-            {updatingHeadline ? 'Updating...' : 'Save Headline'}
+            {updatingHeadline ? 'Saving...' : 'Save Headline'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleBoostNaukri}
+            disabled={!isIdle || boostingNaukri}
+            style={{ 
+              whiteSpace: 'nowrap', 
+              padding: '10px 18px',
+              background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+              border: 'none',
+              boxShadow: '0 0 12px rgba(16, 185, 129, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Zap size={15} fill="currentColor" />
+            {boostingNaukri ? 'Boosting Profile...' : '⚡ Boost Profile Now (Active Today)'}
           </button>
         </div>
         {headlineMsg && (
@@ -498,6 +651,20 @@ export const BotControlPanel = () => {
           }}>
             {headlineMsg.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
             {headlineMsg.text}
+          </div>
+        )}
+        {boostMsg && (
+          <div style={{
+            marginTop: '8px',
+            fontSize: '0.8rem',
+            color: boostMsg.type === 'success' ? '#34d399' : '#f87171',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontWeight: 600
+          }}>
+            {boostMsg.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+            {boostMsg.text}
           </div>
         )}
       </div>

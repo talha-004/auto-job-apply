@@ -43,17 +43,40 @@ if "%ERRORLEVEL%"=="0" (
     echo [AI] Ollama not found on PATH. Falling back to Cloud Gemini / rule engine.
 )
 
-:: 3. Python environment detection
+:: 3. Python environment detection (prefer backend\venv where backend packages are installed)
 set "PYTHON_EXE=python"
-if exist "%~dp0venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
-) else if exist "%~dp0backend\venv\Scripts\python.exe" (
+if exist "%~dp0backend\venv\Scripts\python.exe" (
     set "PYTHON_EXE=%~dp0backend\venv\Scripts\python.exe"
+) else if exist "%~dp0venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
+)
+
+:: Verify uvicorn is installed in chosen Python environment
+"%PYTHON_EXE%" -c "import uvicorn" >nul 2>&1
+if errorlevel 1 (
+    echo [WARNING] uvicorn not found in %PYTHON_EXE%. Checking alternatives...
+    if exist "%~dp0backend\venv\Scripts\python.exe" (
+        "%~dp0backend\venv\Scripts\python.exe" -c "import uvicorn" >nul 2>&1
+        if not errorlevel 1 (
+            set "PYTHON_EXE=%~dp0backend\venv\Scripts\python.exe"
+            echo [OK] Using backend\venv Python.
+        )
+    )
+    if errorlevel 1 (
+        python -c "import uvicorn" >nul 2>&1
+        if not errorlevel 1 (
+            set "PYTHON_EXE=python"
+            echo [OK] Using system Python.
+        ) else (
+            echo [ERROR] uvicorn is not installed in %PYTHON_EXE% or system Python!
+            echo Please run: %PYTHON_EXE% -m pip install -r "%~dp0backend\requirements.txt"
+        )
+    )
 )
 
 echo.
 echo [BACKEND] Starting FastAPI on http://localhost:8000 ...
-start "AutoApplyJobs Backend" cmd /k "cd /d "%~dp0backend" && "%PYTHON_EXE%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+start "AutoApplyJobs Backend" cmd /k "cd /d "%~dp0backend" && "!PYTHON_EXE!" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
 echo [BACKEND] Waiting for API initialization...
 powershell -NoProfile -Command "Start-Sleep -Seconds 3" >nul 2>&1

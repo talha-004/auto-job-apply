@@ -30,6 +30,45 @@ export const resumeAPI = {
     const response = await apiClient.put('/resume/profile', profileData);
     return response.data;
   },
+
+  getVariants: async () => {
+    const response = await apiClient.get('/resume/variants');
+    return response.data;
+  },
+
+  uploadVariant: async (file, label, targetKeywords = '') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post(`/resume/variants/upload?label=${encodeURIComponent(label)}&target_keywords=${encodeURIComponent(targetKeywords)}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  previewRoute: async (jobTitle, jobDescription) => {
+    const response = await apiClient.post('/resume/variants/route-preview', {
+      job_title: jobTitle,
+      job_description: jobDescription,
+    });
+    return response.data;
+  },
+};
+
+export const naukriAPI = {
+  boostProfile: async (headlineOverride = null, dryRun = false) => {
+    const response = await apiClient.post('/platforms/naukri/boost', {
+      headline_override: headlineOverride,
+      dry_run: dryRun,
+    });
+    return response.data;
+  },
+
+  getBoostHistory: async () => {
+    const response = await apiClient.get('/platforms/naukri/boost-history');
+    return response.data;
+  },
 };
 
 export const botAPI = {

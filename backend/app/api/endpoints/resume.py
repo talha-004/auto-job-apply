@@ -160,3 +160,75 @@ async def download_tailored_resume(job_id: str):
         filename=f"Resume_{job_id}.pdf"
     )
 
+
+class RoutePreviewRequest(BaseModel):
+    job_title: str
+    job_description: str
+
+
+@router.get("/variants")
+async def list_resume_variants() -> Dict[str, Any]:
+    """List all available specialized resume variants."""
+    from app.services.multi_resume_router import multi_resume_router
+    variants = multi_resume_router.list_variants()
+    return {
+        "variants": variants,
+        "total_variants": len(variants)
+    }
+
+
+@router.post("/variants/upload")
+async def upload_resume_variant(
+    label: str,
+    target_keywords: str = "",
+    file: UploadFile = File(...)
+) -> Dict[str, Any]:
+    """Upload and register a specialized candidate resume variant."""
+    from app.services.multi_resume_router import multi_resume_router
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided.")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix != ".pdf":
+        raise HTTPException(status_code=400, detail="Only PDF resume variants (.pdf) are supported.")
+
+    variant_id = re.sub(r'[^a-zA-Z0-9_]', '_', label.lower().strip())
+    target_dir = multi_resume_router.resumes_dir
+    dest_path = target_dir / f"{variant_id}.pdf"
+
+    try:
+        with open(dest_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save variant: {str(e)}")
+
+    kws = [k.strip() for k in target_keywords.split(",") if k.strip()]
+    reg = multi_resume_router.register_variant(
+        variant_id=variant_id,
+        label=label,
+        file_path=dest_path,
+        target_keywords=kws,
+        skills=kws
+    )
+
+    await broadcaster.emit_log(f"📑 Registered new resume variant: '{label}' ({len(kws)} keywords)", level=LogLevel.SUCCESS)
+    return {
+        "success": True,
+        "variant": reg
+    }
+
+
+@router.post("/variants/route-preview")
+async def preview_resume_routing(req: RoutePreviewRequest) -> Dict[str, Any]:
+    """Determine which resume variant matches best for a given job posting."""
+    from app.services.multi_resume_router import multi_resume_router
+    routing = multi_resume_router.route_best_resume(
+        job_title=req.job_title,
+        job_description=req.job_description
+    )
+    return {
+        "success": True,
+        "routing": routing
+    }
+
+

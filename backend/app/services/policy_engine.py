@@ -51,12 +51,16 @@ class PolicyEngine:
         answers: List[Dict[str, Any]],
         blacklisted_companies: Optional[List[str]] = None,
         min_match_threshold: float = 50.0,
+        location: Optional[str] = None,
+        prohibited_locations: Optional[List[str]] = None,
+        salary_max: Optional[float] = None,
+        min_salary_floor: Optional[float] = None,
     ) -> PolicyEvaluation:
         reasons = []
         sensitive_fields = []
         avg_confidence = 1.0
 
-        # 1. Hard Rejection Checks (Blacklisted company or low match)
+        # 1. Hard Rejection Checks (Blacklisted company, prohibited location, low salary, or low match)
         if blacklisted_companies:
             norm_comp = company.strip().lower()
             if any(b.strip().lower() in norm_comp for b in blacklisted_companies if b.strip()):
@@ -66,6 +70,24 @@ class PolicyEngine:
                     reasons=[f"Company '{company}' is blacklisted by user policy."],
                     confidence_score=0.0
                 )
+
+        if prohibited_locations and location:
+            loc_norm = location.strip().lower()
+            if any(p.strip().lower() in loc_norm for p in prohibited_locations if p.strip()):
+                return PolicyEvaluation(
+                    decision=PolicyDecision.BLOCK,
+                    autonomy_mode=self.mode,
+                    reasons=[f"Location '{location}' is prohibited by candidate policy."],
+                    confidence_score=0.0
+                )
+
+        if min_salary_floor is not None and salary_max is not None and salary_max < min_salary_floor:
+            return PolicyEvaluation(
+                decision=PolicyDecision.BLOCK,
+                autonomy_mode=self.mode,
+                reasons=[f"Offered salary {salary_max} is below candidate floor {min_salary_floor}."],
+                confidence_score=0.0
+            )
 
         if match_score < min_match_threshold:
             return PolicyEvaluation(

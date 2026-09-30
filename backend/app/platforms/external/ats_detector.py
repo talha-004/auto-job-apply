@@ -9,6 +9,7 @@ from app.platforms.adapter_interface import ApplicationAdapter
 from app.platforms.external.greenhouse import greenhouse_adapter, GreenhouseAdapter
 from app.platforms.external.lever import lever_adapter, LeverAdapter
 from app.platforms.external.workday import workday_adapter, WorkdayAdapter
+from app.platforms.external.smartrecruiters import smartrecruiters_adapter, SmartRecruitersAdapter
 
 
 class ATSDetector:
@@ -19,6 +20,7 @@ class ATSDetector:
             greenhouse_adapter,
             lever_adapter,
             workday_adapter,
+            smartrecruiters_adapter,
         ]
 
     def register_adapter(self, adapter: ApplicationAdapter):

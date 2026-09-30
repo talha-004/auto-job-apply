@@ -159,6 +159,12 @@ class SearchConfig(BaseModel):
     excluded_companies: List[str] = Field(default_factory=list)
     max_experience_gap: Optional[float] = 3.0
     require_remote: bool = False
+    min_salary: Optional[float] = None
+    salary_currency: Optional[str] = "INR"
+    allowed_locations: List[str] = Field(default_factory=list)
+    prohibited_locations: List[str] = Field(default_factory=list)
+    strict_salary_enforcement: bool = False
+    strict_location_enforcement: bool = False
 
     @field_validator("freshness_days")
     @classmethod
