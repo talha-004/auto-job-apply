@@ -101,6 +101,8 @@ class Settings(BaseSettings):
     ENABLE_WEBHOOK_NOTIFICATIONS: bool = False
     WEBHOOK_URL: Optional[str] = None
     NOTIFICATION_EMAIL: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: Optional[str] = None
+    TELEGRAM_CHAT_ID: Optional[str] = None
 
     # Recruiter Response Monitoring (IMAP)
     INBOX_MONITOR_ENABLED: bool = False
