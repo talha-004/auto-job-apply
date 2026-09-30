@@ -21,31 +21,84 @@ import {
   CheckCircle2,
   DollarSign,
   Compass,
-  Flame
+  Flame,
+  Save,
+  RotateCcw,
+  Check
 } from 'lucide-react';
+
+const BOT_CONFIG_STORAGE_KEY = 'autoapply_bot_config';
+
+const DEFAULT_BOT_CONFIG = {
+  keywords: 'Full Stack Developer',
+  location: 'Remote',
+  experience: 3,
+  maxApplications: 25,
+  cooldown: 15,
+  freshnessDays: 3,
+  quickApplyOnly: true,
+  minMatchScore: 60,
+  matchGatingMode: 'observe',
+  headless: false,
+  dryRun: false,
+  minSalary: '12',
+  salaryCurrency: 'INR',
+  allowedLocations: 'Remote, Bengaluru, Hyderabad, Pune',
+  prohibitedLocations: '',
+  strictSalary: false,
+  strictLocation: false,
+  platforms: {
+    LinkedIn: true,
+    Naukri: true,
+    Indeed: true,
+    Dindin: true,
+  }
+};
+
+const getInitialBotConfig = () => {
+  try {
+    const raw = localStorage.getItem(BOT_CONFIG_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { 
+        ...DEFAULT_BOT_CONFIG, 
+        ...parsed, 
+        platforms: { ...DEFAULT_BOT_CONFIG.platforms, ...(parsed.platforms || {}) } 
+      };
+    }
+  } catch (err) {
+    console.error('Error loading bot config from localStorage:', err);
+  }
+  return DEFAULT_BOT_CONFIG;
+};
 
 export const BotControlPanel = () => {
   const { status, profile, systemHealth, refreshStatus } = useBot();
 
-  const [keywords, setKeywords] = useState('Full Stack Developer');
-  const [location, setLocation] = useState('Remote');
-  const [experience, setExperience] = useState(3);
-  const [maxApplications, setMaxApplications] = useState(25);
-  const [cooldown, setCooldown] = useState(15);
-  const [freshnessDays, setFreshnessDays] = useState(3);
-  const [quickApplyOnly, setQuickApplyOnly] = useState(true);
-  const [minMatchScore, setMinMatchScore] = useState(60);
-  const [matchGatingMode, setMatchGatingMode] = useState('observe');
-  const [headless, setHeadless] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
+  const initialConfig = React.useMemo(() => getInitialBotConfig(), []);
+
+  const [keywords, setKeywords] = useState(initialConfig.keywords);
+  const [location, setLocation] = useState(initialConfig.location);
+  const [experience, setExperience] = useState(initialConfig.experience);
+  const [maxApplications, setMaxApplications] = useState(initialConfig.maxApplications);
+  const [cooldown, setCooldown] = useState(initialConfig.cooldown);
+  const [freshnessDays, setFreshnessDays] = useState(initialConfig.freshnessDays);
+  const [quickApplyOnly, setQuickApplyOnly] = useState(initialConfig.quickApplyOnly);
+  const [minMatchScore, setMinMatchScore] = useState(initialConfig.minMatchScore);
+  const [matchGatingMode, setMatchGatingMode] = useState(initialConfig.matchGatingMode);
+  const [headless, setHeadless] = useState(initialConfig.headless);
+  const [dryRun, setDryRun] = useState(initialConfig.dryRun);
 
   // Compensation & Location Sanity Gating State
-  const [minSalary, setMinSalary] = useState('12');
-  const [salaryCurrency, setSalaryCurrency] = useState('INR');
-  const [allowedLocations, setAllowedLocations] = useState('Remote, Bengaluru, Hyderabad, Pune');
-  const [prohibitedLocations, setProhibitedLocations] = useState('');
-  const [strictSalary, setStrictSalary] = useState(false);
-  const [strictLocation, setStrictLocation] = useState(false);
+  const [minSalary, setMinSalary] = useState(initialConfig.minSalary);
+  const [salaryCurrency, setSalaryCurrency] = useState(initialConfig.salaryCurrency);
+  const [allowedLocations, setAllowedLocations] = useState(initialConfig.allowedLocations);
+  const [prohibitedLocations, setProhibitedLocations] = useState(initialConfig.prohibitedLocations);
+  const [strictSalary, setStrictSalary] = useState(initialConfig.strictSalary);
+  const [strictLocation, setStrictLocation] = useState(initialConfig.strictLocation);
+
+  const [platforms, setPlatforms] = useState(initialConfig.platforms);
+  const [saveStatus, setSaveStatus] = useState(null); // null | 'saved' | 'reset'
 
   // Naukri Profile Headline & Booster State
   const [naukriHeadline, setNaukriHeadline] = useState('');
@@ -54,10 +107,102 @@ export const BotControlPanel = () => {
   const [boostingNaukri, setBoostingNaukri] = useState(false);
   const [boostMsg, setBoostMsg] = useState(null);
 
-  // Sync with parsed profile experience and headline if available
+  // Auto-persist changes to localStorage whenever any parameter is modified
+  useEffect(() => {
+    const configToPersist = {
+      keywords,
+      location,
+      experience,
+      maxApplications,
+      cooldown,
+      freshnessDays,
+      quickApplyOnly,
+      minMatchScore,
+      matchGatingMode,
+      headless,
+      dryRun,
+      minSalary,
+      salaryCurrency,
+      allowedLocations,
+      prohibitedLocations,
+      strictSalary,
+      strictLocation,
+      platforms,
+    };
+    try {
+      localStorage.setItem(BOT_CONFIG_STORAGE_KEY, JSON.stringify(configToPersist));
+    } catch (err) {
+      console.error('Failed to auto-save bot config to localStorage:', err);
+    }
+  }, [
+    keywords, location, experience, maxApplications, cooldown, freshnessDays,
+    quickApplyOnly, minMatchScore, matchGatingMode, headless, dryRun, minSalary,
+    salaryCurrency, allowedLocations, prohibitedLocations, strictSalary, strictLocation, platforms
+  ]);
+
+  const handleSaveDefaultsManually = () => {
+    const configToPersist = {
+      keywords,
+      location,
+      experience,
+      maxApplications,
+      cooldown,
+      freshnessDays,
+      quickApplyOnly,
+      minMatchScore,
+      matchGatingMode,
+      headless,
+      dryRun,
+      minSalary,
+      salaryCurrency,
+      allowedLocations,
+      prohibitedLocations,
+      strictSalary,
+      strictLocation,
+      platforms,
+    };
+    try {
+      localStorage.setItem(BOT_CONFIG_STORAGE_KEY, JSON.stringify(configToPersist));
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (err) {
+      console.error('Failed to save defaults:', err);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    setKeywords(DEFAULT_BOT_CONFIG.keywords);
+    setLocation(DEFAULT_BOT_CONFIG.location);
+    setExperience(DEFAULT_BOT_CONFIG.experience);
+    setMaxApplications(DEFAULT_BOT_CONFIG.maxApplications);
+    setCooldown(DEFAULT_BOT_CONFIG.cooldown);
+    setFreshnessDays(DEFAULT_BOT_CONFIG.freshnessDays);
+    setQuickApplyOnly(DEFAULT_BOT_CONFIG.quickApplyOnly);
+    setMinMatchScore(DEFAULT_BOT_CONFIG.minMatchScore);
+    setMatchGatingMode(DEFAULT_BOT_CONFIG.matchGatingMode);
+    setHeadless(DEFAULT_BOT_CONFIG.headless);
+    setDryRun(DEFAULT_BOT_CONFIG.dryRun);
+    setMinSalary(DEFAULT_BOT_CONFIG.minSalary);
+    setSalaryCurrency(DEFAULT_BOT_CONFIG.salaryCurrency);
+    setAllowedLocations(DEFAULT_BOT_CONFIG.allowedLocations);
+    setProhibitedLocations(DEFAULT_BOT_CONFIG.prohibitedLocations);
+    setStrictSalary(DEFAULT_BOT_CONFIG.strictSalary);
+    setStrictLocation(DEFAULT_BOT_CONFIG.strictLocation);
+    setPlatforms(DEFAULT_BOT_CONFIG.platforms);
+
+    try {
+      localStorage.setItem(BOT_CONFIG_STORAGE_KEY, JSON.stringify(DEFAULT_BOT_CONFIG));
+      setSaveStatus('reset');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  // Sync with parsed profile experience and headline if available and not explicitly customized
   useEffect(() => {
     if (profile) {
-      if (profile.years_of_experience) {
+      if (profile.years_of_experience && !localStorage.getItem(BOT_CONFIG_STORAGE_KEY)) {
         setExperience(Math.round(profile.years_of_experience));
       }
       if (profile.work_experience?.length > 0 && profile.skills?.length > 0) {
@@ -69,13 +214,6 @@ export const BotControlPanel = () => {
       }
     }
   }, [profile]);
-
-  const [platforms, setPlatforms] = useState({
-    LinkedIn: true,
-    Naukri: true,
-    Indeed: true,
-    Dindin: true,
-  });
 
   const [loading, setLoading] = useState(false);
   const [preflightResult, setPreflightResult] = useState(null);
@@ -257,7 +395,7 @@ export const BotControlPanel = () => {
 
   return (
     <div className="glass-card" style={{ padding: '24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
             padding: '8px',
@@ -273,6 +411,91 @@ export const BotControlPanel = () => {
               Configure job parameters, freshness filters, and platform automation options
             </p>
           </div>
+        </div>
+
+        {/* Action Controls & Auto-Save Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {saveStatus === 'saved' && (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              fontSize: '0.78rem',
+              color: '#34d399',
+              background: 'rgba(16, 185, 129, 0.12)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              padding: '4px 10px',
+              borderRadius: '9999px',
+              animation: 'fadeIn 0.2s ease-in-out'
+            }}>
+              <Check size={13} /> Defaults Saved
+            </span>
+          )}
+
+          {saveStatus === 'reset' && (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              fontSize: '0.78rem',
+              color: '#38bdf8',
+              background: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              padding: '4px 10px',
+              borderRadius: '9999px',
+              animation: 'fadeIn 0.2s ease-in-out'
+            }}>
+              <RotateCcw size={13} /> Reset to Defaults
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            disabled={!isIdle}
+            title="Reset all search parameters to default recommendations"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.8rem',
+              fontWeight: 500,
+              cursor: isIdle ? 'pointer' : 'default',
+              transition: 'all 0.2s'
+            }}
+          >
+            <RotateCcw size={13} />
+            Reset
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSaveDefaultsManually}
+            disabled={!isIdle}
+            title="Explicitly save current parameters as your persistent baseline"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              background: 'rgba(56, 189, 248, 0.15)',
+              border: '1px solid rgba(56, 189, 248, 0.4)',
+              borderRadius: 'var(--radius-sm)',
+              color: '#38bdf8',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: isIdle ? 'pointer' : 'default',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Save size={13} />
+            Save Defaults
+          </button>
         </div>
       </div>
 
