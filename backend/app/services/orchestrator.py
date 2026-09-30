@@ -24,7 +24,8 @@ from app.models.job import (
     ApplicationStatus,
     PlatformEnum,
     LogLevel,
-    JobApplicationRecord
+    JobApplicationRecord,
+    DiscoveryConfig
 )
 from app.services.discovery.discovery_manager import discovery_manager
 from app.services.job_evaluator import job_evaluator
@@ -199,12 +200,13 @@ class ApplicationOrchestrator:
 
             discovered_jobs: List[DiscoveredJob] = []
             try:
-                discovered_jobs = await discovery_manager.discover_jobs(
+                disc_cfg = DiscoveryConfig(
                     keywords=config.keywords,
                     location=config.location,
                     platforms=[p.value.lower() for p in config.platforms if p != PlatformEnum.DINDIN],
                     results_wanted=min(50, config.max_applications * 2)
                 )
+                discovered_jobs = await discovery_manager.discover_jobs(disc_cfg)
             except Exception as disc_err:
                 logger.warning(f"Fast discovery encountered non-fatal error: {disc_err}. Will rely on platform crawlers.")
 

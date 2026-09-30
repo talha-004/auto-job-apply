@@ -15,13 +15,40 @@ class LinkedInPlatform(BasePlatform):
     async def is_logged_in(self) -> bool:
         """Check if current page session is logged in to LinkedIn."""
         try:
-            await self.page.goto(f"{self.base_url}/feed/", wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)
-            # Check for feed identity element or search bar
-            if "feed" in self.page.url or await self.page.query_selector(".global-nav__me"):
-                return True
-        except Exception:
-            pass
+            url = self.page.url.lower()
+            # If on authwall, login, checkpoint, or signup pages, definitely NOT logged in
+            if any(x in url for x in ["/login", "/authwall", "/uas/", "/checkpoint", "signup"]):
+                return False
+
+            # If login input fields exist on page, definitely NOT logged in
+            if await self.page.query_selector("#username, #session_key, input[name='session_key'], input[id='username']"):
+                return False
+
+            # Check if navigated to feed or jobs and authenticated elements are present
+            if "/feed" not in url and "/jobs" not in url:
+                await self.page.goto(f"{self.base_url}/feed/", wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(2)
+                url = self.page.url.lower()
+
+            if any(x in url for x in ["/login", "/authwall", "/uas/", "/checkpoint", "signup"]):
+                return False
+
+            # Check for authentic logged-in selectors
+            logged_in_selectors = [
+                ".global-nav__me",
+                "img.global-nav__me-photo",
+                ".feed-identity-module",
+                ".share-box-feed-entry",
+                "a[href*='/in/']",
+                "input.search-global-typeahead__input",
+                "button.global-nav__primary-link:has-text('Me')",
+                "nav.global-nav__nav"
+            ]
+            for sel in logged_in_selectors:
+                if await self.page.query_selector(sel):
+                    return True
+        except Exception as e:
+            logger.debug(f"LinkedIn is_logged_in check exception: {e}")
         return False
 
     async def login(self) -> bool:
@@ -45,25 +72,33 @@ class LinkedInPlatform(BasePlatform):
             return False
 
         try:
+            await broadcaster.emit_log("Navigating to LinkedIn login page...", platform=self.platform_name.value)
             await self.page.goto(f"{self.base_url}/login", wait_until="domcontentloaded", timeout=30000)
             await self.human_delay(1.5, 3.0)
 
-            # Check for username input
-            username_input = await self.page.query_selector("#username")
-            password_input = await self.page.query_selector("#password")
+            # Check for username & password inputs
+            username_input = await self.page.query_selector(
+                "#username, #session_key, input[name='session_key'], input[id='username'], input[autocomplete='username']"
+            )
+            password_input = await self.page.query_selector(
+                "#password, #session_password, input[name='session_password'], input[id='password'], input[autocomplete='current-password']"
+            )
 
             if username_input and password_input:
+                await broadcaster.emit_log("Entering LinkedIn login credentials...", platform=self.platform_name.value)
                 await self.human_type(username_input, email)
-                await self.human_delay(0.5, 1.2)
+                await self.human_delay(0.6, 1.2)
                 await self.human_type(password_input, password)
                 await self.human_delay(0.8, 1.5)
 
-                submit_btn = await self.page.query_selector("button[type='submit']")
+                submit_btn = await self.page.query_selector(
+                    "button[type='submit'], button[data-litms-control-urn='login-submit'], button:has-text('Sign in')"
+                )
                 if submit_btn:
                     await submit_btn.click()
 
             await self.page.wait_for_load_state("domcontentloaded")
-            await asyncio.sleep(3)
+            await asyncio.sleep(4)
 
             # Check for 2FA / Verification Challenge
             if await self.check_for_captcha() or "checkpoint" in self.page.url:
